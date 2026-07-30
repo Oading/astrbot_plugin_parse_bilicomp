@@ -1,0 +1,57 @@
+{
+  "enable_passive_parse": {
+    "description": "启用被动解析",
+    "type": "bool",
+    "default": true,
+    "hint": "自动识别消息中的B站链接并发送解析结果"
+  },
+  "send_video": {
+    "description": "发送视频文件",
+    "type": "bool",
+    "default": true,
+    "hint": "解析或下载时同时发送视频文件（需要FFmpeg）"
+  },
+  "send_cover": {
+    "description": "发送封面图",
+    "type": "bool",
+    "default": true,
+    "hint": "在文本卡片后附加视频封面图片（render_as_image=false时生效）"
+  },
+  "render_as_image": {
+    "description": "渲染为图片卡片",
+    "type": "bool",
+    "default": true,
+    "hint": "将视频信息渲染为HTML图片卡片发送，关闭则发送文字+封面图"
+  },
+  "cache_ttl": {
+    "description": "去重缓存时间（分钟）",
+    "type": "int",
+    "default": 5,
+    "hint": "同一链接在此时间内不重复解析，0=关闭"
+  },
+  "auto_download_max_duration": {
+    "description": "自动下载最大时长（分钟）",
+    "type": "int",
+    "default": 10,
+    "hint": "超过此时长不自动下载，0=关闭限制"
+  },
+  "video_quality": {
+    "description": "视频下载清晰度",
+    "type": "string",
+    "default": "_720P",
+    "options": ["_360P", "_480P", "_720P", "_1080P"],
+    "hint": "选择下载视频的最高清晰度"
+  },
+  "parse_template": {
+    "description": "解析消息模板",
+    "type": "text",
+    "default": "📺 {title}\nUP: {up_name}\n时长: {duration}\n发布时间: {pub_time}\n播放: {view}  点赞: {like}  弹幕: {danmaku}\n简介: {desc}\n链接: {link}",
+    "hint": "支持变量: {title} {up_name} {link} {bvid} {aid} {duration} {pub_time} {view} {like} {danmaku} {reply} {favorite} {coin} {share} {tname} {desc}"
+  },
+  "bilibili_cookies": {
+    "description": "B站Cookies",
+    "type": "text",
+    "hint": "可选手动填入，也可通过 /bili 登录 扫码自动填充",
+    "invisible": true
+  }
+}

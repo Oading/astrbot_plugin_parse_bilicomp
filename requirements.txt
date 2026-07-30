@@ -1,0 +1,7 @@
+httpx>=0.25.0
+bilibili-api-python>=16.0.0
+
+# 视频下载需要 FFmpeg
+# Windows: https://ffmpeg.org/download.html
+# macOS: brew install ffmpeg
+# Linux: apt install ffmpeg

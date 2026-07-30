@@ -1,0 +1,11 @@
+name: astrbot_plugin_parse_bilicomp
+display_name: B站内容解析
+short_desc: 解析B站视频链接并下载，支持被动解析/手动下载/自动下载/扫码登录
+desc: >
+  B站内容解析插件，支持被动识别消息中的B站链接并回复视频信息卡片，
+  支持 /bili下载 手动下载视频，支持群内自动下载，支持扫码登录获取高清画质。
+author: oading
+version: 1.0.0
+astrbot_version: ">=4.10.4,<5"
+support_platforms:
+  - aiocqhttp
