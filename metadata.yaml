@@ -6,6 +6,7 @@ desc: >
   支持 /bili下载 手动下载视频，支持群内自动下载，支持扫码登录获取高清画质。
 author: oading
 version: 1.0.0
+repo: https://github.com/Oading/astrbot_plugin_parse_bilicomp
 astrbot_version: ">=4.10.4,<5"
 support_platforms:
   - aiocqhttp
