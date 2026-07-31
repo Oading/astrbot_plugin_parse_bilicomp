@@ -1,9 +1,16 @@
 {
-  "enable_passive_parse": {
-    "description": "启用被动解析",
-    "type": "bool",
-    "default": true,
-    "hint": "自动识别消息中的B站链接并发送解析结果"
+  "passive_parse_mode": {
+    "description": "被动解析模式",
+    "type": "string",
+    "default": "local",
+    "options": ["global", "local"],
+    "hint": "全局(global)：所有群聊均启用被动解析，/bili 自动下载 命令失效。局部(local)：仅在启用了自动下载的群聊中解析，通过 /bili 自动下载 on/off 控制"
+  },
+  "enabled_groups": {
+    "description": "启用群号（局部模式）",
+    "type": "list",
+    "default": [],
+    "hint": "仅在局部模式下生效。需要启用被动解析的群号列表。也可以通过 /bili 自动下载 on/off 命令动态添加/移除"
   },
   "send_video": {
     "description": "发送视频文件",
@@ -12,10 +19,10 @@
     "hint": "解析或下载时同时发送视频文件（需要FFmpeg）"
   },
   "send_cover": {
-    "description": "发送封面图",
+    "description": "文字消息附带封面图",
     "type": "bool",
     "default": true,
-    "hint": "在文本卡片后附加视频封面图片（render_as_image=false时生效）"
+    "hint": "仅 渲染为图片卡片关闭 时生效：关闭则只发纯文字，开启则额外附带封面图片"
   },
   "render_as_image": {
     "description": "渲染为图片卡片",
@@ -30,10 +37,10 @@
     "hint": "同一链接在此时间内不重复解析，0=关闭"
   },
   "auto_download_max_duration": {
-    "description": "自动下载最大时长（分钟）",
+    "description": "视频最大时长（分钟）",
     "type": "int",
     "default": 10,
-    "hint": "超过此时长不自动下载，0=关闭限制"
+    "hint": "超过此时长不下载/发送视频文件，0=关闭限制"
   },
   "video_quality": {
     "description": "视频下载清晰度",
@@ -51,7 +58,6 @@
   "bilibili_cookies": {
     "description": "B站Cookies",
     "type": "text",
-    "hint": "可选手动填入，也可通过 /bili 登录 扫码自动填充",
-    "invisible": true
+    "hint": "可选手动填入，也可通过 /bili 登录 扫码自动填充"
   }
 }

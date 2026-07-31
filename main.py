@@ -23,8 +23,7 @@ from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import At, Image, Json, Plain, Video as MessageVideo
 from astrbot.api.star import Context, Star, StarTools
 
-from bilibili_api import Credential, select_client, request_settings
-from bilibili_api.login_v2 import QrCodeLogin, QrCodeLoginEvents
+from bilibili_api import Credential
 from bilibili_api.user import get_self_info
 from bilibili_api.comment import CommentResourceType, OrderType, get_comments
 from bilibili_api.video import (
@@ -37,6 +36,8 @@ from bilibili_api.video import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_parse_bilicomp"
+
+
 
 # ── URL 正则 ─────────────────────────────────────────
 
@@ -392,11 +393,17 @@ def _iter_strings(payload):
 # ── 凭证管理 ─────────────────────────────────────────
 
 class CredentialManager:
-    def __init__(self, data_dir: Path, config: AstrBotConfig):
+
+    QR_GENERATE = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
+    QR_POLL = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
+
+    def __init__(self, data_dir: Path, config: AstrBotConfig, client: httpx.AsyncClient):
         self._file = data_dir / "credential.json"
         self._config = config
+        self._client = client
         self._credential: Credential | None = None
-        self._qr: QrCodeLogin | None = None
+        self._qr_key: str = ""
+        self._qr_image: bytes = b""
         self._load()
 
     def _load(self):
@@ -413,6 +420,13 @@ class CredentialManager:
                 json.dumps(self._credential.get_cookies(), ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            # 同步到 WebUI 可见的 bilibili_cookies 配置
+            cookie_parts = []
+            for k, v in self._credential.get_cookies().items():
+                if v:
+                    cookie_parts.append(f"{k}={v}")
+            self._config["bilibili_cookies"] = "; ".join(cookie_parts)
+            self._config.save_config()
 
     async def get(self) -> Credential | None:
         # 优先从配置读取
@@ -447,34 +461,61 @@ class CredentialManager:
         return None
 
     async def login_qrcode(self) -> bytes:
-        self._qr = QrCodeLogin()
-        await self._qr.generate_qrcode()
-        return self._qr.get_qrcode_picture().content
+        import qrcode
+        from io import BytesIO
+        resp = await self._client.get(self.QR_GENERATE)
+        data = resp.json()
+        if data.get("code") != 0:
+            raise Exception(f"生成二维码失败: {data.get('message', '未知错误')}")
+        self._qr_key = data["data"]["qrcode_key"]
+        qr_url = data["data"]["url"]
+        img = qrcode.make(qr_url)
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
 
     async def poll_qr(self):
-        if not self._qr:
+        if not self._qr_key:
             yield "二维码未生成"
             return
         for _ in range(90):
             try:
-                state = await self._qr.check_state()
+                resp = await self._client.get(
+                    self.QR_POLL, params={"qrcode_key": self._qr_key}
+                )
+                resp_data = resp.json()
             except Exception as e:
                 yield f"检查失败: {e}"
                 return
-            if state == QrCodeLoginEvents.DONE:
-                self._credential = self._qr.get_credential()
-                self._save()
-                try:
-                    profile = await get_self_info(self._credential)
-                    uname = profile.get("name", "未知")
-                    yield f"✅ 登录成功！账号: {uname}"
-                except Exception:
-                    yield "✅ 登录成功！"
+
+            code = resp_data.get("data", {}).get("code") if resp_data.get("code") == 0 else resp_data.get("code")
+            if code == 0:
+                # 登录成功，从 Set-Cookie 提取凭证
+                cookies: dict = {}
+                for key in resp.cookies:
+                    cookies[key] = resp.cookies[key]
+                logger.info(f"Login cookies: {list(cookies.keys())}, SESSDATA={'有' if cookies.get('SESSDATA') else '无'}")
+                if cookies.get("SESSDATA"):
+                    self._credential = Credential.from_cookies(cookies)
+                    self._save()
+                    try:
+                        profile = await get_self_info(self._credential)
+                        uname = profile.get("name", "未知")
+                        yield f"✅ 登录成功！账号: {uname}"
+                    except Exception:
+                        yield "✅ 登录成功！"
+                else:
+                    yield "✅ 登录成功！（但未能提取凭证，请手动填写 Cookie）"
                 return
-            if state == QrCodeLoginEvents.CONF:
-                yield "📱 已扫描，请在手机上确认..."
-            elif state == QrCodeLoginEvents.TIMEOUT:
+            elif code in (86090, 86101):
+                if code == 86090:
+                    yield "📱 已扫描，请在手机上确认..."
+            elif code == 86038:
                 yield "⏰ 二维码已过期"
+                return
+            else:
+                msg = resp_data.get("data", {}).get("message", "") or resp_data.get("message", "")
+                yield f"状态异常(code={code}): {msg}"
                 return
             await asyncio.sleep(2)
         yield "⏰ 登录超时"
@@ -492,6 +533,8 @@ class CredentialManager:
     async def clear(self):
         self._credential = None
         self._file.unlink(missing_ok=True)
+        self._config["bilibili_cookies"] = ""
+        self._config.save_config()
 
 
 # ── B站服务 ──────────────────────────────────────────
@@ -503,7 +546,7 @@ class BilibiliService:
         self._cache_dir = cache_dir
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
-    async def fetch_video_card(self, bvid: str = "", aid: int = 0, page: int = 1) -> VideoCard:
+    async def fetch_video_card(self, bvid: str = "", aid: int = 0, page: int = 1, quality: str = "_720P") -> VideoCard:
         cred = await self._cred_mgr.get()
         if aid:
             v = Video(aid=aid, credential=cred)
@@ -532,7 +575,7 @@ class BilibiliService:
         # 尝试下载视频
         video_path = None
         try:
-            video_path = await self._download_video(v, page_idx)
+            video_path = await self._download_video(v, page_idx, quality)
         except Exception as e:
             logger.debug(f"视频下载失败（将仅发送图文）: {e}")
 
@@ -555,11 +598,12 @@ class BilibiliService:
             video_path=video_path,
         )
 
-    async def _download_video(self, v: Video, page_idx: int) -> Path | None:
+    async def _download_video(self, v: Video, page_idx: int, quality: str = "_720P") -> Path | None:
         download_data = await v.get_download_url(page_index=page_idx)
         detecter = VideoDownloadURLDataDetecter(download_data)
+        video_quality = getattr(VideoQuality, quality, VideoQuality._720P)
         streams = detecter.detect_best_streams(
-            video_max_quality=VideoQuality._720P,
+            video_max_quality=video_quality,
             codecs=[VideoCodecs.AVC],
             no_dolby_video=True,
             no_hdr=True,
@@ -686,7 +730,6 @@ class ParseBilibiliPlugin(Star):
         # 数据目录
         self._data_dir = StarTools.get_data_dir(PLUGIN_NAME)
         self._media_dir = self._data_dir / "media_cache"
-        self._auto_dl_file = self._data_dir / "auto_download.json"
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._media_dir.mkdir(parents=True, exist_ok=True)
 
@@ -698,18 +741,17 @@ class ParseBilibiliPlugin(Star):
         )
 
         # 服务
-        self._cred_mgr = CredentialManager(self._data_dir, config)
+        self._cred_mgr = CredentialManager(self._data_dir, config, self._client)
         self._service = BilibiliService(self._client, self._cred_mgr, self._media_dir)
         self._debounce: dict[str, dict[str, float]] = {}  # umo -> {key: expires_at}
 
-        # 自动下载
-        self._auto_dl_groups: set[str] = set()
-        self._load_auto_dl()
+        # 已启用被动解析的群组（局部模式，来源为 WebUI 配置）
+        self._init_enabled_groups()
 
     # ── 生命周期 ──────────────────────────────────
 
     async def initialize(self):
-        self._load_auto_dl()
+        self._init_enabled_groups()
         asyncio.create_task(self._cleanup_loop())
         logger.info(f"{PLUGIN_NAME} 已加载")
 
@@ -727,19 +769,18 @@ class ParseBilibiliPlugin(Star):
             except Exception:
                 pass
 
-    # ── 自动下载配置 ────────────────────────────────
+    # ── 局部模式群组配置 ──────────────────────────────
 
-    def _load_auto_dl(self):
-        try:
-            if self._auto_dl_file.exists():
-                data = json.loads(self._auto_dl_file.read_text(encoding="utf-8"))
-                if isinstance(data, list):
-                    self._auto_dl_groups = {str(g) for g in data}
-        except Exception:
-            pass
+    def _init_enabled_groups(self):
+        """确保 enabled_groups 是合法列表"""
+        groups = self.config.get("enabled_groups", [])
+        if not isinstance(groups, list):
+            self.config["enabled_groups"] = []
 
-    def _save_auto_dl(self):
-        self._auto_dl_file.write_text(json.dumps(list(self._auto_dl_groups)), encoding="utf-8")
+    @property
+    def _enabled_groups(self) -> set[str]:
+        return {str(g) for g in self.config.get("enabled_groups", [])}
+
 
     # ── 去重 ──────────────────────────────────────
 
@@ -886,8 +927,15 @@ class ParseBilibiliPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
-        if not self.config.get("enable_passive_parse", True):
-            return
+        # ── 被动解析模式检查 ──
+        mode = self.config.get("passive_parse_mode", "local")
+        gid = event.get_group_id()
+        if mode == "local":
+            # 局部模式：仅已启用的群聊才解析
+            if gid and str(gid) not in self._enabled_groups:
+                return
+        # global 模式：所有群聊都解析，无需额外检查
+
         if str(event.get_sender_id()) == str(event.get_self_id()):
             return
 
@@ -917,14 +965,20 @@ class ParseBilibiliPlugin(Star):
             return
 
         try:
+            quality = self.config.get("video_quality", "_720P")
             if AV_PATTERN.fullmatch(bvid):
                 aid_val = int(bvid.lstrip("avAV"))
-                card = await self._service.fetch_video_card(aid=aid_val, page=page)
+                card = await self._service.fetch_video_card(aid=aid_val, page=page, quality=quality)
             else:
-                card = await self._service.fetch_video_card(bvid=bvid, page=page)
+                card = await self._service.fetch_video_card(bvid=bvid, page=page, quality=quality)
         except Exception as e:
             logger.error(f"被动解析失败: {e}")
             return
+
+        # 检查时长限制，超时不下载/发送视频
+        max_dur = safe_int(self.config.get("auto_download_max_duration", 10), 10)
+        if max_dur > 0 and card.duration_seconds > max_dur * 60:
+            card.video_path = None
 
         # 发送
         chains = await self._build_chains(card)
@@ -936,19 +990,6 @@ class ParseBilibiliPlugin(Star):
                     logger.warning(f"视频发送失败: {e}")
             else:
                 yield event.chain_result(chain.chain)
-
-        # 自动下载
-        gid = event.get_group_id()
-        if gid and str(gid) in self._auto_dl_groups:
-            max_dur = safe_int(self.config.get("auto_download_max_duration", 10), 10)
-            if max_dur <= 0 or card.duration_seconds <= max_dur * 60:
-                if card.video_path:
-                    try:
-                        vc = MessageChain()
-                        vc.chain.append(MessageVideo.fromFileSystem(str(card.video_path)))
-                        await self.context.send_message(umo, vc)
-                    except Exception as e:
-                        logger.warning(f"自动下载发送失败: {e}")
 
         event.stop_event()
 
@@ -996,11 +1037,12 @@ class ParseBilibiliPlugin(Star):
         yield event.plain_result("⏳ 正在获取视频信息...")
 
         try:
+            quality = self.config.get("video_quality", "_720P")
             if AV_PATTERN.fullmatch(bvid_or_url):
                 aid_val = int(bvid_or_url.lstrip("avAV"))
-                card = await self._service.fetch_video_card(aid=aid_val, page=page)
+                card = await self._service.fetch_video_card(aid=aid_val, page=page, quality=quality)
             else:
-                card = await self._service.fetch_video_card(bvid=bvid_or_url, page=page)
+                card = await self._service.fetch_video_card(bvid=bvid_or_url, page=page, quality=quality)
         except Exception as e:
             yield event.plain_result(f"获取视频失败: {e}")
             return
@@ -1027,22 +1069,33 @@ class ParseBilibiliPlugin(Star):
     @bili.command("自动下载")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def cmd_auto(self, event: AstrMessageEvent, action: str = ""):
+        mode = self.config.get("passive_parse_mode", "local")
+        if mode == "global":
+            yield event.plain_result("当前为全局被动解析模式，所有群聊均已启用。如需局部控制，请在插件配置中将被动解析模式改为 local。")
+            return
+
         gid = event.get_group_id()
         if not gid:
             yield event.plain_result("仅限群聊使用")
             return
         gs = str(gid)
+        groups: list = self.config.get("enabled_groups", [])
         if action == "on":
-            if gs in self._auto_dl_groups:
+            if gs in self._enabled_groups:
                 yield event.plain_result("已开启")
             else:
-                self._auto_dl_groups.add(gs)
-                self._save_auto_dl()
-                yield event.plain_result("✅ 已开启自动下载")
+                groups.append(gs)
+                self.config["enabled_groups"] = groups
+                self.config.save_config()
+                yield event.plain_result("✅ 已在本群开启被动解析")
         elif action == "off":
-            self._auto_dl_groups.discard(gs)
-            self._save_auto_dl()
-            yield event.plain_result("✅ 已关闭自动下载")
+            if gs not in self._enabled_groups:
+                yield event.plain_result("本群未开启被动解析")
+            else:
+                groups = [g for g in groups if str(g) != gs]
+                self.config["enabled_groups"] = groups
+                self.config.save_config()
+                yield event.plain_result("✅ 已在本群关闭被动解析")
         else:
             yield event.plain_result("用法: /bili 自动下载 on|off")
 
@@ -1050,11 +1103,11 @@ class ParseBilibiliPlugin(Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def cmd_login(self, event: AstrMessageEvent):
         try:
-            qr = await self._cred_mgr.login_qrcode()
+            qr_bytes = await self._cred_mgr.login_qrcode()
         except Exception as e:
             yield event.plain_result(f"生成二维码失败: {e}")
             return
-        yield event.chain_result([Image.fromBytes(qr)])
+        yield event.chain_result([Image.fromBytes(qr_bytes)])
         yield event.plain_result("请用哔哩哔哩客户端扫码（3分钟内）")
         async for msg in self._cred_mgr.poll_qr():
             yield event.plain_result(msg)
@@ -1062,5 +1115,27 @@ class ParseBilibiliPlugin(Star):
     @bili.command("状态")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def cmd_status(self, event: AstrMessageEvent):
-        s = await self._cred_mgr.status()
-        yield event.plain_result(s)
+        # 1. 解析模式
+        mode = self.config.get("passive_parse_mode", "local")
+        mode_text = "全局" if mode == "global" else "局部"
+        lines = [f"被动解析模式：{mode_text}"]
+
+        # 2. 当前群解析状态
+        gid = event.get_group_id()
+        if mode == "global":
+            lines.append("本群被动解析：已开启（全局模式）")
+        elif gid:
+            enabled = "已开启" if str(gid) in self._enabled_groups else "未开启"
+            lines.append(f"本群被动解析：{enabled}")
+
+        # 3. 登录状态
+        login_status = await self._cred_mgr.status()
+        lines.append(login_status)
+
+        yield event.plain_result("\n".join(lines))
+
+    @bili.command("登出")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def cmd_logout(self, event: AstrMessageEvent):
+        await self._cred_mgr.clear()
+        yield event.plain_result("✅ 已登出")
