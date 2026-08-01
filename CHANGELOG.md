@@ -2,6 +2,26 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## [2.1.0] - 2026-08-01
+
+### 新增
+- 加入了之前忘记加的许可证
+- B站专栏链接（`/read/cv`）解析：支持 API 获取标题、作者、正文，渲染为图片卡片
+- B站图文动态链接（`/opus`、`t.bilibili.com`）解析：支持文字、图片、转发内容，渲染为图片卡片
+- QQ 转发小组件短链（`b23.tv`）自动识别并解析为对应内容类型
+- 专栏类 opus 自动转为 `/read/cv` 渲染（通过 `Dynamic.turn_to_article()`）
+- `opus_try_article` 配置开关：控制 opus 无文字时是否尝试转专栏获取全文
+- 图文动态卡片统计栏使用 vanfont 图标字体，与视频卡片风格统一
+
+### 修复
+- 短链重定向到非视频页面（opus/cv）时 bot 无反应
+- 不同 URL 格式（`t.bilibili.com` vs `www.bilibili.com/opus`）触发去重互相拦截
+- 专栏正文前 YAML frontmatter 导致卡片显示元数据而非正文
+- 纯文本动态通过 polymer API 无法获取 desc 文字（缺少 `timezone_offset` 参数）
+
+### 变更
+- `fetch_article_info` 使用 `bilibili_api.article.Article` 类（对齐 ZhenXun），含 `json()` 和 `info.summary` 两级回退
+
 ## [2.0.1] - 2026-08-01
 ### 变更
 - 仅仅是加了CHANGELOG而已

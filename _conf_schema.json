@@ -55,6 +55,12 @@
     "default": "📺 {title}\nUP: {up_name}\n时长: {duration}\n发布时间: {pub_time}\n播放: {view}  点赞: {like}  弹幕: {danmaku}\n简介: {desc}\n链接: {link}",
     "hint": "支持变量: {title} {up_name} {link} {bvid} {aid} {duration} {pub_time} {view} {like} {danmaku} {reply} {favorite} {coin} {share} {tname} {desc}"
   },
+  "opus_try_article": {
+    "description": "opus 尝试转专栏(建议开启)",
+    "type": "bool",
+    "default": true,
+    "hint": "当识别到 /opus 时，尝试转为 /read/cv 获取全文。仅对专栏类动态生效，普通图文无效"
+  },
   "bilibili_cookies": {
     "description": "B站Cookies",
     "type": "text",
