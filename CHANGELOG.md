@@ -2,6 +2,11 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## [2.1.1] - 2026-08-01
+
+### 新增
+- 补全requirements中的缺失依赖
+
 ## [2.1.0] - 2026-08-01
 
 ### 新增
@@ -23,8 +28,10 @@
 - `fetch_article_info` 使用 `bilibili_api.article.Article` 类（对齐 ZhenXun），含 `json()` 和 `info.summary` 两级回退
 
 ## [2.0.1] - 2026-08-01
+
 ### 变更
 - 仅仅是加了CHANGELOG而已
+
 ## [2.0.0] - 2026-08-01
 
 ### 新增
