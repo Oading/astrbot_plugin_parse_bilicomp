@@ -2,7 +2,7 @@
   "passive_parse_mode": {
     "description": "被动解析模式",
     "type": "string",
-    "default": "local",
+    "default": "global",
     "options": ["global", "local"],
     "hint": "全局(global)：所有群聊均启用被动解析，/bili 自动下载 命令失效。局部(local)：仅在启用了自动下载的群聊中解析，通过 /bili 自动下载 on/off 控制"
   },
@@ -40,13 +40,44 @@
     "description": "视频最大时长（分钟）",
     "type": "int",
     "default": 10,
-    "hint": "超过此时长不下载/发送视频文件，0=关闭限制"
+    "hint": "超过此时长不下载/发送视频文件"
+  },
+  "max_video_size_mb": {
+    "description": "视频最大大小（MB）",
+    "type": "int",
+    "default": 100,
+    "hint": "超过此大小不下载/发送视频文件"
+  },
+  "download_restriction_mode": {
+    "description": "下载限制模式",
+    "type": "string",
+    "default": "both",
+    "options": ["duration_only", "size_only", "both", "either", "none"],
+    "hint": "仅时长: 只检查时长限制 | 仅大小: 只检查大小限制 | 都不超过: 时长和大小均不超过限制才下载 | 满足一个: 时长或大小任一不超过即可下载 | 不限制: 不做任何限制"
+  },
+  "show_download_prompt": {
+    "description": "下载前显示提示信息",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后下载视频前会显示视频标题和预估大小"
+  },
+  "show_download_fail_reason": {
+    "description": "显示无法下载的原因",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后当视频因时长/大小限制无法下载时，会告知用户具体原因"
+  },
+  "retract_download_prompt": {
+    "description": "撤回下载提示",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后下载提示消息将在一分钟后尝试撤回，同时提示信息中会加入(该消息一分钟后撤回)字样"
   },
   "video_quality": {
     "description": "视频下载清晰度",
     "type": "string",
-    "default": "_720P",
-    "options": ["_360P", "_480P", "_720P", "_1080P"],
+    "default": "480P",
+    "options": ["360P", "480P", "720P", "1080P"],
     "hint": "选择下载视频的最高清晰度"
   },
   "parse_template": {

@@ -23,9 +23,10 @@
 | **视频信息卡片** | 展示封面、UP 主头像、标题、播放/弹幕/点赞/投币/收藏/分享/评论数据、简介以及热门评论 |
 | **动态/专栏信息卡片** | 展示动态或专栏的部分预览 |
 | **解析冷却机制** | 默认 5 分钟内同一链接不重复解析，避免重复刷屏 |
-| **手动下载** | 支持 `/bili下载 <链接/BV号/AV号>`、`/bili 下载 <链接/BV号/AV号>` 主动下载 B 站视频 |
+| **手动下载** | 支持 `/bili 下载 <链接/BV号/AV号>` 主动下载 B 站视频 |
 | **自动下载** | 管理员可通过`/bili 自动下载 on`、`/bili 自动下载 off`控制群内自动下载功能，该指令在全局解析下无效 |
-| **下载限制** | 默认仅自动下载 10 分钟以内的视频，避免过大文件影响群聊体验 可通过WebUI配置下载视频最长时长 |
+| **下载限制** | 默认仅自动下载 10 分钟/100MB以内的视频，避免过大文件影响群聊体验 可通过WebUI配置下载视频最长时长与最大大小；且支持下载限制模式切换 |
+| **下载提示** |  下载视频前会显示视频标题和预估大小，可选择是否主动撤回提示；当无法下载会告知原因 |
 | **扫码登录** | 支持 `/bili 登录` 生成二维码扫码登录 B 站账号 |
 | **登录状态查询** | 支持 `/bili 状态` 查看当前被动解析模式相关与登录状态 |
 | **登出账号** | 支持 `/bili 登出` 登出后会清空bilibili_cookies的值 |
@@ -71,14 +72,19 @@
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
-| `passive_parse_mode` | local | 被动解析模式 |
+| `passive_parse_mode` | global | 被动解析模式 |
 | `enabled_groups` | — | 当被动解析模式为local时可以按需添加需要被动解析的群组 |
 | `send_video` | true | 解析或下载时同时发送视频文件 |
 | `send_cover` | true | 渲染为图片卡片关闭时附加封面图片 |
 | `render_as_image` | true | 渲染为 HTML 图片卡片，关闭则发送文字 + 封面图 |
 | `cache_ttl` | 5 | 去重缓存时间（分钟），0 = 关闭 |
-| `auto_download_max_duration` | 10 | 自动下载最大时长（分钟），0 = 关闭限制 |
-| `video_quality` | _720P | 下载清晰度：_360P / _480P / _720P / _1080P |
+| `auto_download_max_duration` | 10 | 自动下载最大时长（分钟） |
+| `max_video_size_mb` | 100 | 自动下载最大大小（MB） |
+| `download_restriction_mode` | both | 下载限制模式 |
+| `show_download_prompt` | true | 下载提示信息 |
+| `show_download_fail_reason` | true | 下载失败信息 |
+| `retract_download_prompt` | false | 开启后，下载成功时下载提示信息在一分钟后会尝试撤回 |
+| `video_quality` | 480P | 下载清晰度：360P / 480P / 720P / 1080P |
 | `parse_template` | 详见插件配置 | 文字模式下的消息模板 |
 | `opus_try_article` | true | 当识别到 /opus 时，尝试转为 /read/cv 获取全文。仅对专栏类动态生效，普通图文无效 |
 | `*bilibili_cookies` | — | B站 Cookies（`/bili 登录` 扫码填充） |
