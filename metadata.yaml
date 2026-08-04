@@ -5,7 +5,7 @@ desc: >
   B站内容解析插件，支持被动识别对话消息中的B站链接/组件并回复视频信息卡片，
   支持手动/自动下载视频，扫码登录获取高清画质。
 author: oading
-version: 2.1.1
+version: 3.0.0
 repo: https://github.com/Oading/astrbot_plugin_parse_bilicomp
 astrbot_version: ">=4.10.4,<5"
 support_platforms:

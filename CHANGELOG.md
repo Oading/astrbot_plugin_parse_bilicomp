@@ -2,6 +2,39 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## [3.0.0] - 2026-08-04
+
+### 新增
+- **模块拆分**：单文件 1668 行拆分为 `core/` 子包下 7 个模块（constants / models / utils / credential / resolver / service / card_builder），`main.py` 仅保留插件入口与命令路由
+- **下载大小预估**：基于 DASH `bandwidth × duration / 8` 在下载前估算视频大小
+- **下载限制模式**：新增 `download_restriction_mode` 配置（duration_only / size_only / both / either / none）
+- **视频最大大小限制**：新增 `max_video_size_mb` 配置项
+- **下载提示**：新增 `show_download_prompt`，下载前显示标题、时长、预估大小及实际画质
+- **画质不符提醒**：实际画质与请求不符时提示"⚠️ 实际画质: 720P（请求: 1080P），登录后可获取更高质量"
+- **下载失败原因**：新增 `show_download_fail_reason`，告知用户因时长/大小限制无法下载的具体原因
+- **下载提示撤回**：新增 `retract_download_prompt`，开启后下载提示 60 秒后通过 OneBot API 撤回
+- **`/bili` 命令树**：无子命令时自动显示所有可用命令及描述
+- **core/__init__.py**：统一重导出，`main.py` 一行导入所有依赖
+
+### 变更
+- **配置默认值**：
+  - `passive_parse_mode`: local → global
+  - `video_quality`: 720P → 480P（默认无需登录）
+  - `download_restriction_mode`: 新增，默认 both
+- **清晰度选项**：去下划线（`_720P` → `720P`），WebUI 展示更友好
+- **移除 `0=关闭限制`**：`auto_download_max_duration` 和 `max_video_size_mb` 不再支持 0 表示关闭，改为通过 `download_restriction_mode` 控制
+- **命令精简**：移除独立 `/bili下载`、`/b站下载` 指令，统一为 `/bili 下载`
+- **依赖注入**：`CardBuilder` 通过构造函数接收 `html_render` 可调用对象，解耦 Star 基类
+- **网络 I/O 集中**：`download_b64`、`fetch_comments`、`resolve_short` 迁移至 `BilibiliService`
+- **README**：更新
+
+### 修复
+- `resolve_short()` 短链解析后 AV 号检测误用 `BV_PATTERN`
+- `/bili` 指令组下 `状态`/`登录`/`登出` 脱离为独立指令（装饰器顺序：`@permission_type` 必须在 `@bili.command` 外层）
+- 撤回提示重复发送（`_send_via_onebot` 返回值歧义导致回退至 `event.send()`）
+- 撤回从未执行（`event.send()` 返回对象非 `dict`，`message_id` 提取失败）
+- `FONT_PATH` 路径适配 `core/` 目录结构
+
 ## [2.1.1] - 2026-08-01
 
 ### 新增
