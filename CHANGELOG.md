@@ -2,6 +2,37 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## [3.0.1] - 2026-08-26
+
+### 新增
+
+- **多P视频下载功能**：新增 `download_all_pages` 配置项（`bool`，默认 `false`），开启后尝试下载视频所有 P（最多 10 个），关闭则只下载 1P
+- **VideoCard 多P字段**：新增 `pages`（所有 P 的信息 `[{page, part, duration}]`）、`downloaded_pages`（已下载的 P 号列表）以及 `page_count`（总 P 数）属性
+- **多P下载处理**：新增 `_handle_multi_page()`，逐 P 检测时长/大小限制，跳过不满足的 P 并发送提示，最后发送汇总提示、汇总卡片和逐个视频文件
+- **多P汇总提示**：新增 `_format_multi_page_prompt()`，生成包含各 P 标题、时长、大小的汇总提示
+- **汇总卡片多P徽标**：标题下方粉色徽标“共 N P · 本次下载 M P”
+- **时长格式化工具**：新增 `format_duration()`（`core/utils.py`），将秒转换为 `MM:SS` 或 `HH:MM:SS`
+- **下载计划缓存**：新增 `DownloadPlan` 数据类（`core/models.py`），缓存一次 `get_download_url` 的结果（视频/音频 URL、码率、实际画质）
+- **手动下载多P支持**：`/bili 下载` 同步支持多P
+
+### 变更
+
+- **`service.py`**：
+  - 移除 `estimate_download_size`、`download_video(bvid/aid)`、`_download_video`
+  - 新增 `prepare_download()`：仅一次 `get_download_url`，失败记录 `logger.warning`
+  - 新增 `estimate_size(plan)`：纯计算，无网络请求
+  - 新增 `download_video(plan)` → `_download_from_plan(plan)`：复用 plan URL
+  - `fetch_video_card` 移除 `download` 参数，只负责获取信息
+- **`main.py` 下载流程**：改为 `prepare → estimate → check → download(plan)`
+- **多P行为约定**：忽略 `?p=N` 参数，从第 1P 开始下载全部；发送汇总卡片 + 全部视频；一条汇总提示；最多 10 个 P
+- **配置与文档**：`metadata.yaml` 版本 `3.0.0` → `3.0.1`；`README.md` 新增 `download_all_pages` 配置说明；`_conf_schema.json` 新增 `download_all_pages` 配置项
+
+### 修复
+
+- **视频偶发“只发图片不下载”（静默失败）**： `get_download_url` 被调用两次（`estimate_download_size` 与 `download_video` 各一次），连续请求易触发 B 站风控限流，第二次拿到空流导致静默失败。通过引入 `DownloadPlan` 缓存一次请求结果，将 API 请求从 4 次降到 2 次，大幅降低限流概率。同时 `plan` 为 `None` 时提示“获取下载信息失败，请稍后重试”，使失败可见
+- **转发 Component（QQ 小程序卡片）去重失效**：根因是 Component 提取的短链 URL 带跟踪参数（`ts` 等），每次转发参数不同导致去重 key 不稳定。修复方式为将短链解析移到去重之前，用解析后的稳定 BV/AV 作为去重 key，并在 `on_message` 中调换“短链解析”与“去重”两段代码顺序，同时补充视频场景的 `bvid_or_url` 赋值
+
+
 ## [3.0.0] - 2026-08-04
 
 ### 新增

@@ -37,6 +37,19 @@ class VideoCard:
     up_face_url: str = ""
     tname: str = ""
     video_path: Path | None = None
+    pages: list = None  # 所有P的信息 [{page, part, duration}, ...]
+    downloaded_pages: list = None  # 已下载的P号列表（多P模式用于汇总卡片显示）
+
+    def __post_init__(self):
+        if self.pages is None:
+            self.pages = []
+        if self.downloaded_pages is None:
+            self.downloaded_pages = []
+
+    @property
+    def page_count(self) -> int:
+        """总 P 数（至少 1）。"""
+        return max(1, len(self.pages)) if self.pages is not None else 1
 
     @property
     def duration_text(self) -> str:
@@ -78,3 +91,21 @@ class OpusCard:
     forward_count: int
     pub_ts: int
     url: str
+
+
+@dataclass
+class DownloadPlan:
+    """下载计划：由 BilibiliService.prepare_download 生成。
+
+    将 get_download_url 的结果缓存起来，供预估大小与实际下载共用，
+    避免对 B站 API 重复请求（重复请求易触发风控限流）。
+    """
+
+    video_url: str
+    audio_url: str = ""
+    video_bandwidth: int = 0
+    audio_bandwidth: int = 0
+    actual_quality: str = ""
+    duration_s: int = 0
+    stem: str = "video"
+    page_idx: int = 0

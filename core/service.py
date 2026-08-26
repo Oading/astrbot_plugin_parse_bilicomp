@@ -19,15 +19,14 @@ from bilibili_api.video import (
     VideoCodecs,
     VideoDownloadURLDataDetecter,
     VideoQuality,
-    VideoStreamDownloadURL,
 )
 
 from astrbot.api import logger
 
 from .constants import AV_PATTERN, BV_PATTERN
 from .credential import CredentialManager
-from .models import ArticleCard, OpusCard, VideoCard
-from .utils import format_count, format_timestamp, safe_int, sanitize_desc
+from .models import ArticleCard, DownloadPlan, OpusCard, VideoCard
+from .utils import format_count, safe_int, sanitize_desc
 
 
 class BilibiliService:
@@ -57,17 +56,15 @@ class BilibiliService:
         bvid: str = "",
         aid: int = 0,
         page: int = 1,
-        quality: str = "_720P",
-        download: bool = True,
+        quality: str = "_480P",
     ) -> VideoCard:
-        """获取视频信息，可选是否尝试下载视频文件。
+        """获取视频信息（不下载视频文件）。
 
         Args:
             bvid: BV 号。
             aid:  AV 号。
             page: 分P 页码。
-            quality: 下载清晰度（仅 download=True 时生效）。
-            download: 是否尝试下载视频文件。
+            quality: 下载清晰度（预留，实际下载走 prepare_download/download_video）。
         """
         cred = await self._cred_mgr.get()
         if aid:
@@ -84,6 +81,15 @@ class BilibiliService:
             page_idx = 0
         pg = pages[page_idx] if pages else {}
 
+        # 构建所有 P 的信息列表（供多 P 下载使用）
+        pages_info = []
+        for i, p in enumerate(pages):
+            pages_info.append({
+                "page": safe_int(p.get("page", i + 1)),
+                "part": str(p.get("part", "")),
+                "duration": safe_int(p.get("duration", 0)),
+            })
+
         owner = info.get("owner", {})
         stat = info.get("stat", {})
         _bvid = str(info.get("bvid", bvid))
@@ -93,14 +99,6 @@ class BilibiliService:
             link += f"?p={page_idx + 1}"
 
         dur = safe_int(pg.get("duration", info.get("duration", 0)))
-
-        # 尝试下载视频
-        video_path = None
-        if download:
-            try:
-                video_path = await self._download_video(v, page_idx, quality)
-            except Exception as e:
-                logger.debug(f"视频下载失败（将仅发送图文）: {e}")
 
         return VideoCard(
             aid=_aid,
@@ -121,22 +119,24 @@ class BilibiliService:
             coin=safe_int(stat.get("coin", 0)),
             share=safe_int(stat.get("share", 0)),
             tname=str(info.get("tname", "")),
-            video_path=video_path,
+            video_path=None,
+            pages=pages_info,
         )
 
-    async def estimate_download_size(
+    async def prepare_download(
         self,
         bvid: str = "",
         aid: int = 0,
         page: int = 1,
-        quality: str = "_720P",
-    ) -> dict | None:
-        """预估视频+音频下载大小（基于 DASH bandwidth），不实际下载。
+        quality: str = "_480P",
+        duration_s: int = 0,
+        stem: str = "video",
+    ) -> DownloadPlan | None:
+        """获取视频下载流信息（仅一次 get_download_url）。
 
         Returns:
-            {"video_mb": float, "audio_mb": float, "total_mb": float,
-             "duration_s": int, "video_bandwidth": int, "audio_bandwidth": int}
-            或 None（获取失败时）。
+            DownloadPlan（含视频/音频 URL、码率、实际画质等）或 None（获取失败）。
+            该计划可复用于 estimate_size 与 download_video，避免重复请求。
         """
         cred = await self._cred_mgr.get()
         if aid:
@@ -146,74 +146,77 @@ class BilibiliService:
         else:
             return None
 
-        try:
-            info = await v.get_info()
-        except Exception:
-            return None
-
-        pages = info.get("pages") or []
         page_idx = max(0, page - 1)
-        if page_idx >= len(pages):
-            page_idx = 0
-        pg = pages[page_idx] if pages else {}
-        duration_s = safe_int(pg.get("duration", info.get("duration", 0)))
 
         try:
             download_data = await v.get_download_url(page_index=page_idx)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"获取下载地址失败: {e}")
             return None
 
         detecter = VideoDownloadURLDataDetecter(download_data)
-        video_quality = getattr(VideoQuality, quality, VideoQuality._720P)
-        streams = detecter.detect_best_streams(
-            video_max_quality=video_quality,
-            codecs=[VideoCodecs.AVC],
-            no_dolby_video=True,
-            no_hdr=True,
-        )
+        video_quality = getattr(VideoQuality, quality, VideoQuality._480P)
+        try:
+            streams = detecter.detect_best_streams(
+                video_max_quality=video_quality,
+                codecs=[VideoCodecs.AVC],
+                no_dolby_video=True,
+                no_hdr=True,
+            )
+        except Exception as e:
+            logger.warning(f"解析下载流失败: {e}")
+            return None
+
         if not streams:
+            logger.warning("未获取到可用下载流（可能触发 B站限流）")
             return None
 
         vs = streams[0]
-        video_bandwidth = getattr(vs, "bandwidth", 0)
-        audio_bandwidth = 0
-        if len(streams) > 1 and isinstance(streams[1], AudioStreamDownloadURL):
-            audio_bandwidth = getattr(streams[1], "bandwidth", 0)
-
-        if video_bandwidth <= 0 and audio_bandwidth <= 0:
+        video_url = getattr(vs, "url", "")
+        if not video_url:
+            logger.warning("视频流 URL 为空")
             return None
 
-        # bandwidth 单位 bps，duration 单位秒 → 字节
-        video_bytes = video_bandwidth * duration_s / 8
-        audio_bytes = audio_bandwidth * duration_s / 8
-        total_bytes = video_bytes + audio_bytes
+        video_bandwidth = getattr(vs, "bandwidth", 0)
+        audio_bandwidth = 0
+        audio_url = ""
+        if len(streams) > 1 and isinstance(streams[1], AudioStreamDownloadURL):
+            audio_stream = streams[1]
+            audio_url = getattr(audio_stream, "url", "")
+            audio_bandwidth = getattr(audio_stream, "bandwidth", 0)
 
+        quality_enum = getattr(vs, "video_quality", None)
+        actual_quality = quality_enum.name if quality_enum else ""
+
+        return DownloadPlan(
+            video_url=video_url,
+            audio_url=audio_url,
+            video_bandwidth=video_bandwidth,
+            audio_bandwidth=audio_bandwidth,
+            actual_quality=actual_quality,
+            duration_s=duration_s,
+            stem=stem,
+            page_idx=page_idx,
+        )
+
+    def estimate_size(self, plan: DownloadPlan) -> dict:
+        """根据下载计划计算预估大小（纯计算，无网络请求）。"""
+        video_bytes = plan.video_bandwidth * plan.duration_s / 8
+        audio_bytes = plan.audio_bandwidth * plan.duration_s / 8
+        total_bytes = video_bytes + audio_bytes
         return {
             "video_mb": round(video_bytes / 1024 / 1024, 2),
             "audio_mb": round(audio_bytes / 1024 / 1024, 2),
             "total_mb": round(total_bytes / 1024 / 1024, 2),
-            "duration_s": duration_s,
-            "video_bandwidth": video_bandwidth,
-            "audio_bandwidth": audio_bandwidth,
-            "actual_quality": vs.video_quality.name,  # 如 "_720P"
+            "duration_s": plan.duration_s,
+            "video_bandwidth": plan.video_bandwidth,
+            "audio_bandwidth": plan.audio_bandwidth,
+            "actual_quality": plan.actual_quality,
         }
 
-    async def download_video(
-        self,
-        bvid: str = "",
-        aid: int = 0,
-        page: int = 1,
-        quality: str = "_720P",
-    ) -> Path | None:
-        """仅下载视频文件（不获取信息），返回缓存路径或 None。"""
-        cred = await self._cred_mgr.get()
-        if aid:
-            v = Video(aid=aid, credential=cred)
-        elif bvid:
-            v = Video(bvid=bvid, credential=cred)
-        else:
-            return None
-        return await self._download_video(v, max(0, page - 1), quality)
+    async def download_video(self, plan: DownloadPlan) -> Path | None:
+        """根据下载计划下载视频（复用 plan 中的 URL，不再请求 B站）。"""
+        return await self._download_from_plan(plan)
 
     # ── 专栏 ───────────────────────────────────────────
 
@@ -424,29 +427,9 @@ class BilibiliService:
 
     # ── 视频下载（内部）────────────────────────────────
 
-    async def _download_video(
-        self, v: Video, page_idx: int, quality: str = "_720P"
-    ) -> Path | None:
-        """下载视频并合并音轨（需要 FFmpeg）。返回缓存文件路径或 None。"""
-        download_data = await v.get_download_url(page_index=page_idx)
-        detecter = VideoDownloadURLDataDetecter(download_data)
-        video_quality = getattr(VideoQuality, quality, VideoQuality._720P)
-        streams = detecter.detect_best_streams(
-            video_max_quality=video_quality,
-            codecs=[VideoCodecs.AVC],
-            no_dolby_video=True,
-            no_hdr=True,
-        )
-        if not streams:
-            return None
-
-        vs = streams[0]
-        video_url = getattr(vs, "url", "")
-        if not video_url:
-            return None
-
-        bvid = str(getattr(v, "get_bvid", lambda: "")())
-        stem = f"{bvid}-p{page_idx + 1}"
+    async def _download_from_plan(self, plan: DownloadPlan) -> Path | None:
+        """根据下载计划下载视频并合并音轨（需要 FFmpeg）。"""
+        stem = plan.stem
         output = self._cache_dir / f"{stem}.mp4"
         if output.exists() and output.stat().st_size > 0:
             return output
@@ -458,27 +441,20 @@ class BilibiliService:
             if cookie:
                 headers["Cookie"] = cookie
 
-        audio_stream = streams[1] if len(streams) > 1 else None
-        audio_url = (
-            getattr(audio_stream, "url", "")
-            if isinstance(audio_stream, AudioStreamDownloadURL)
-            else ""
-        )
-
-        if audio_url:
+        if plan.audio_url:
             v_temp = self._cache_dir / f"{stem}.video.m4s"
             a_temp = self._cache_dir / f"{stem}.audio.m4s"
             try:
                 await asyncio.gather(
-                    self._download(video_url, v_temp, headers),
-                    self._download(audio_url, a_temp, headers),
+                    self._download(plan.video_url, v_temp, headers),
+                    self._download(plan.audio_url, a_temp, headers),
                 )
                 await self._ffmpeg_merge(v_temp, a_temp, output)
             finally:
                 v_temp.unlink(missing_ok=True)
                 a_temp.unlink(missing_ok=True)
         else:
-            await self._download(video_url, output, headers)
+            await self._download(plan.video_url, output, headers)
 
         return output if (output.exists() and output.stat().st_size > 0) else None
 

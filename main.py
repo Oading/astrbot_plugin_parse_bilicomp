@@ -39,6 +39,7 @@ from .core import (
     CardBuilder,
     CredentialManager,
     LinkResolver,
+    format_duration,
     quality_display,
     resolve_quality,
     safe_int,
@@ -214,7 +215,7 @@ class ParseBilibiliPlugin(Star):
 
         Args:
             card: VideoCard 实例。
-            size_info: estimate_download_size 返回的字典或 None。
+            size_info: estimate_size 返回的字典或 None。
             retract: 是否附加撤回提示文字。
             requested_quality: 用户配置的期望清晰度（如 '720P'），用于与实际对比。
         """
@@ -239,6 +240,109 @@ class ParseBilibiliPlugin(Star):
         if retract:
             lines.append("（该消息一分钟后撤回）")
         return "\n".join(lines)
+
+    def _format_multi_page_prompt(
+        self, card, video_paths: list, retract: bool = False
+    ) -> str:
+        """生成多P下载的汇总提示文本。
+
+        Args:
+            card: VideoCard 实例（主信息）。
+            video_paths: [(page_num, path, size_info, pg), ...] 已下载的P。
+            retract: 是否附加撤回提示文字。
+        """
+        lines = ["📥 即将下载视频（多P）"]
+        if card.title:
+            lines.append(f"📺 {card.title}")
+        lines.append(f"📦 共 {card.page_count} P · 本次下载 {len(video_paths)} P")
+        for page_num, _path, size_info, pg in video_paths:
+            part = pg.get("part") or f"第{page_num}P"
+            dur_text = format_duration(pg.get("duration", 0))
+            size_text = f"{size_info['total_mb']}MB" if size_info else "未知"
+            lines.append(f"  P{page_num} {part} | {dur_text} | {size_text}")
+        if retract:
+            lines.append("（该消息一分钟后撤回）")
+        return "\n".join(lines)
+
+    async def _handle_multi_page(
+        self, event, card, quality, requested_quality, umo, bvid_or_aid_kw,
+        always_download: bool = False,
+    ):
+        """多P下载流程：逐P检测限制 → 下载 → 发送汇总卡片 + 视频 + 提示。
+
+        Args:
+            always_download: 手动下载时为 True，忽略 send_video 开关强制下载。
+        """
+        send_video = always_download or self.config.get("send_video", True)
+        pages = card.pages[:10]  # 最多 10 个 P
+
+        if not send_video:
+            # 不发送视频文件：仅发送汇总卡片（显示共N P）
+            card.video_path = None
+            chains = await self._card_builder.build_video_chains(card)
+            for chain in chains:
+                if not (len(chain.chain) == 1 and isinstance(chain.chain[0], MessageVideo)):
+                    yield event.chain_result(chain.chain)
+            return
+
+        # 1. 逐P检测限制
+        downloaded = []  # [(page_num, plan, size_info, pg)]
+        failed_pages = []
+        for pg in pages:
+            page_num = pg["page"]
+            duration = pg["duration"]
+            stem = f"{card.bvid}-p{page_num}"
+            plan = await self._service.prepare_download(
+                page=page_num, quality=quality, duration_s=duration,
+                stem=stem, **bvid_or_aid_kw,
+            )
+            size_info = self._service.estimate_size(plan) if plan else None
+            can_download, _ = self._check_download_restrictions(duration, size_info)
+            if can_download and plan:
+                downloaded.append((page_num, plan, size_info, pg))
+            else:
+                failed_pages.append(page_num)
+
+        # 2. 下载所有满足限制的P
+        video_paths = []  # [(page_num, path, size_info, pg)]
+        for page_num, plan, size_info, pg in downloaded:
+            try:
+                path = await self._service.download_video(plan)
+                if path:
+                    video_paths.append((page_num, path, size_info, pg))
+                else:
+                    failed_pages.append(page_num)
+            except Exception as e:
+                logger.warning(f"第{page_num}P下载失败: {e}")
+                failed_pages.append(page_num)
+
+        # 3. 发不满足提示
+        if failed_pages and self.config.get("show_download_fail_reason", True):
+            failed_str = "、".join(f"{p}P" for p in sorted(failed_pages))
+            yield event.plain_result(f"当前{failed_str}不满足下载限制")
+
+        # 4. 发汇总下载提示
+        if video_paths and self.config.get("show_download_prompt", True):
+            retract = self.config.get("retract_download_prompt", False)
+            prompt = self._format_multi_page_prompt(card, video_paths, retract=retract)
+            await self._send_prompt_and_maybe_retract(event, prompt)
+
+        # 5. 发汇总卡片
+        card.video_path = None
+        card.downloaded_pages = [p for p, _, _, _ in video_paths]
+        chains = await self._card_builder.build_video_chains(card)
+        for chain in chains:
+            if not (len(chain.chain) == 1 and isinstance(chain.chain[0], MessageVideo)):
+                yield event.chain_result(chain.chain)
+
+        # 6. 发所有视频文件
+        for page_num, path, _size_info, _pg in video_paths:
+            vc = MessageChain()
+            vc.chain.append(MessageVideo.fromFileSystem(str(path)))
+            try:
+                await self.context.send_message(umo, vc)
+            except Exception as e:
+                logger.warning(f"第{page_num}P视频发送失败: {e}")
 
     async def _send_prompt_and_maybe_retract(
         self, event: AstrMessageEvent, text: str
@@ -365,13 +469,7 @@ class ParseBilibiliPlugin(Star):
         if not bvid_or_url:
             return
 
-        # ── 去重 ──
-        umo = event.unified_msg_origin
-        key = f"{source_kind}:{bvid_or_url}"
-        if self._is_debounced(umo, key):
-            return
-
-        # ── 短链解析 ──
+        # ── 短链解析（先于去重，用解析后的稳定标识作为去重 key）──
         bvid = bvid_or_url
         if source_kind == "short":
             bvid = await self._service.resolve_short(bvid_or_url)
@@ -382,6 +480,15 @@ class ParseBilibiliPlugin(Star):
             elif OPUS_PATTERN.search(bvid):
                 source_kind = "opus"
                 bvid_or_url = OPUS_PATTERN.search(bvid).group(1)
+            else:
+                # 视频：bvid 已是解析后的 BV/AV，用作去重 key
+                bvid_or_url = bvid
+
+        # ── 去重 ──
+        umo = event.unified_msg_origin
+        key = f"{source_kind}:{bvid_or_url}"
+        if self._is_debounced(umo, key):
+            return
 
         # ── 专栏解析 ──
         if source_kind == "article":
@@ -439,56 +546,70 @@ class ParseBilibiliPlugin(Star):
             if AV_PATTERN.fullmatch(bvid):
                 aid_val = int(bvid.lstrip("avAV"))
                 card = await self._service.fetch_video_card(
-                    aid=aid_val, page=page, quality=quality, download=False
+                    aid=aid_val, page=page, quality=quality
                 )
                 bvid_or_aid_kw = {"aid": aid_val}
             else:
                 card = await self._service.fetch_video_card(
-                    bvid=bvid, page=page, quality=quality, download=False
+                    bvid=bvid, page=page, quality=quality
                 )
                 bvid_or_aid_kw = {"bvid": bvid}
         except Exception as e:
             logger.error(f"被动解析失败: {e}")
             return
 
-        # 2. 预估大小 & 检查限制
+        # 多P下载分支
+        if self.config.get("download_all_pages", False) and card.page_count > 1:
+            async for r in self._handle_multi_page(
+                event, card, quality, requested_quality, umo, bvid_or_aid_kw
+            ):
+                yield r
+            event.stop_event()
+            return
+
+        # 2. 准备下载计划（一次 get_download_url）& 检查限制
+        plan = None
         size_info = None
-        restriction_mode = self.config.get("download_restriction_mode", "duration_only")
-        if restriction_mode != "none":
-            try:
-                size_info = await self._service.estimate_download_size(
-                    page=page, quality=quality, **bvid_or_aid_kw
-                )
-            except Exception as e:
-                logger.debug(f"预估视频大小失败: {e}")
+        send_video = self.config.get("send_video", True)
+        if send_video:
+            plan = await self._service.prepare_download(
+                page=page,
+                quality=quality,
+                duration_s=card.duration_seconds,
+                stem=f"{card.bvid}-p{page}",
+                **bvid_or_aid_kw,
+            )
+            if plan:
+                size_info = self._service.estimate_size(plan)
 
         can_download, reasons = self._check_download_restrictions(
             card.duration_seconds, size_info
         )
 
-        # 3. 执行下载（如允许）
-        if can_download and self.config.get("send_video", True):
-            try:
-                card.video_path = await self._service.download_video(
-                    page=page, quality=quality, **bvid_or_aid_kw
-                )
-                # 下载提示
-                if self.config.get("show_download_prompt", True) and card.video_path:
-                    retract = self.config.get("retract_download_prompt", False)
-                    prompt = self._format_size_prompt(
-                        card, size_info, retract=retract,
-                        requested_quality=requested_quality,
-                    )
-                    await self._send_prompt_and_maybe_retract(event, prompt)
-            except Exception as e:
-                logger.debug(f"视频下载失败: {e}")
-        elif not can_download and reasons:
-            # 无法下载时可选告知原因
-            if self.config.get("show_download_fail_reason", True):
-                reason_text = "；".join(reasons)
-                yield event.plain_result(f"⚠️ 未下载视频: {reason_text}")
-            card.video_path = None
-        elif not can_download:
+        # 3. 执行下载或告知原因
+        if send_video:
+            if can_download and plan:
+                try:
+                    card.video_path = await self._service.download_video(plan)
+                    # 下载提示
+                    if self.config.get("show_download_prompt", True) and card.video_path:
+                        retract = self.config.get("retract_download_prompt", False)
+                        prompt = self._format_size_prompt(
+                            card, size_info, retract=retract,
+                            requested_quality=requested_quality,
+                        )
+                        await self._send_prompt_and_maybe_retract(event, prompt)
+                except Exception as e:
+                    logger.warning(f"视频下载失败: {e}")
+                    card.video_path = None
+            else:
+                card.video_path = None
+                if self.config.get("show_download_fail_reason", True):
+                    if reasons:
+                        yield event.plain_result(f"⚠️ 未下载视频: {'；'.join(reasons)}")
+                    elif plan is None:
+                        yield event.plain_result("⚠️ 获取下载信息失败，请稍后重试")
+        else:
             card.video_path = None
 
         # 4. 发送卡片
@@ -546,44 +667,44 @@ class ParseBilibiliPlugin(Star):
             if AV_PATTERN.fullmatch(bvid_or_url):
                 aid_val = int(bvid_or_url.lstrip("avAV"))
                 card = await self._service.fetch_video_card(
-                    aid=aid_val, page=page, quality=quality, download=False
+                    aid=aid_val, page=page, quality=quality
                 )
                 bvid_or_aid_kw = {"aid": aid_val}
             else:
                 card = await self._service.fetch_video_card(
-                    bvid=bvid_or_url, page=page, quality=quality, download=False
+                    bvid=bvid_or_url, page=page, quality=quality
                 )
                 bvid_or_aid_kw = {"bvid": bvid_or_url}
         except Exception as e:
             yield event.plain_result(f"获取视频失败: {e}")
             return
 
-        # 2. 预估大小 & 检查限制
-        size_info = None
-        restriction_mode = self.config.get("download_restriction_mode", "duration_only")
-        if restriction_mode != "none":
-            try:
-                size_info = await self._service.estimate_download_size(
-                    page=page, quality=quality, **bvid_or_aid_kw
-                )
-            except Exception as e:
-                logger.debug(f"预估视频大小失败: {e}")
+        # 多P下载分支（手动下载强制下载）
+        if self.config.get("download_all_pages", False) and card.page_count > 1:
+            async for r in self._handle_multi_page(
+                event, card, quality, requested_quality,
+                event.unified_msg_origin, bvid_or_aid_kw,
+                always_download=True,
+            ):
+                yield r
+            return
+
+        # 2. 准备下载计划（一次 get_download_url）& 检查限制
+        plan = await self._service.prepare_download(
+            page=page,
+            quality=quality,
+            duration_s=card.duration_seconds,
+            stem=f"{card.bvid}-p{page}",
+            **bvid_or_aid_kw,
+        )
+        size_info = self._service.estimate_size(plan) if plan else None
 
         can_download, reasons = self._check_download_restrictions(
             card.duration_seconds, size_info
         )
 
         # 3. 执行下载或告知原因
-        if not can_download and reasons:
-            if self.config.get("show_download_fail_reason", True):
-                reason_text = "；".join(reasons)
-                yield event.plain_result(f"⚠️ 无法下载: {reason_text}")
-            else:
-                yield event.plain_result("⚠️ 无法下载该视频")
-            card.video_path = None
-        elif not can_download:
-            card.video_path = None
-        else:
+        if can_download and plan:
             # 下载提示
             if self.config.get("show_download_prompt", True):
                 retract = self.config.get("retract_download_prompt", False)
@@ -594,13 +715,23 @@ class ParseBilibiliPlugin(Star):
                 await self._send_prompt_and_maybe_retract(event, prompt)
             yield event.plain_result("⏳ 正在下载视频...")
             try:
-                card.video_path = await self._service.download_video(
-                    page=page, quality=quality, **bvid_or_aid_kw
-                )
+                card.video_path = await self._service.download_video(plan)
                 if card.video_path:
-                    yield event.plain_result(f"✅ 下载完成: {card.title} ({card.duration_text})")
+                    yield event.plain_result(
+                        f"✅ 下载完成: {card.title} ({card.duration_text})"
+                    )
             except Exception as e:
                 yield event.plain_result(f"视频下载失败: {e}")
+                card.video_path = None
+        else:
+            card.video_path = None
+            if self.config.get("show_download_fail_reason", True):
+                if reasons:
+                    yield event.plain_result(f"⚠️ 无法下载: {'；'.join(reasons)}")
+                elif plan is None:
+                    yield event.plain_result("⚠️ 获取下载信息失败，请稍后重试")
+                else:
+                    yield event.plain_result("⚠️ 无法下载该视频")
 
         # 4. 发送卡片
         chains = await self._card_builder.build_video_chains(card)

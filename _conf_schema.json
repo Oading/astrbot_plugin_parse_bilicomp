@@ -73,6 +73,12 @@
     "default": false,
     "hint": "开启后下载提示消息将在一分钟后尝试撤回，同时提示信息中会加入(该消息一分钟后撤回)字样"
   },
+  "download_all_pages": {
+    "description": "下载多P视频的所有P",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后尝试下载视频的所有P（最多10个），每个P独立检测时长/大小限制；关闭则只下载1P"
+  },
   "video_quality": {
     "description": "视频下载清晰度",
     "type": "string",

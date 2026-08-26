@@ -17,7 +17,7 @@ from .credential import CredentialManager
 from .models import ArticleCard, OpusCard, VideoCard
 from .resolver import LinkResolver
 from .service import BilibiliService
-from .utils import safe_int
+from .utils import format_duration, safe_int
 
 __all__ = [
     "CardBuilder",
@@ -34,5 +34,6 @@ __all__ = [
     "VideoCard",
     "LinkResolver",
     "BilibiliService",
+    "format_duration",
     "safe_int",
 ]
