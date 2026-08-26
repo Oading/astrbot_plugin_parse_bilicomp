@@ -10,7 +10,7 @@
 [![Python](https://img.shields.io/badge/Python-3.12%2B-blue)](Python)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A54.10.4-green)](AstrBot)
 
-**AstrBot 插件，解析B站内容组件并以图片展示信息，支持视频自动/手动下载、动态/专栏预览、扫码登录等功能。**
+**解析B站相关内容组件并以图片展示，支持视频下载、动态/专栏预览等功能。**
 
 > [!NOTE]
 > 下文包含的命令前缀 `/` 即默认用户在WebUI中 配置文件>平台配置>唤醒词 使用了 `/` 如使用了其他唤醒词则直接替换即可
@@ -84,6 +84,7 @@
 | `show_download_prompt` | true | 下载提示信息 |
 | `show_download_fail_reason` | true | 下载失败信息 |
 | `retract_download_prompt` | false | 开启后，下载成功时下载提示信息在一分钟后会尝试撤回 |
+| `download_all_pages` | false | 开启后尝试下载视频的所有P（最多10个），每个P独立检测时长/大小限制；关闭则只下载1P |
 | `video_quality` | 480P | 下载清晰度：360P / 480P / 720P / 1080P |
 | `parse_template` | 详见插件配置 | 文字模式下的消息模板 |
 | `opus_try_article` | true | 当识别到 /opus 时，尝试转为 /read/cv 获取全文。仅对专栏类动态生效，普通图文无效 |

@@ -169,6 +169,12 @@ VIDEO_CARD_HTML = '''<!DOCTYPE html>
     display: -webkit-box; -webkit-line-clamp: 2;
     -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis;
   }
+  .video-info .pages-info {
+    display: inline-block;
+    font-size: 22px; line-height: 1.4; color: #fb7299;
+    background-color: #fff0f5; border-radius: 6px;
+    padding: 3px 12px; margin-bottom: 12px;
+  }
   .video-info .meta {
     display: flex; justify-content: space-between;
     margin-top: 8px; margin-bottom: 15px;
@@ -255,6 +261,9 @@ VIDEO_CARD_HTML = '''<!DOCTYPE html>
   </div>
   <div class="video-info">
     <div class="title">{{ title }}</div>
+    {% if page_info %}
+    <div class="pages-info">{{ page_info }}</div>
+    {% endif %}
     <div class="meta">
       <span>发布于: {{ pub_time }}</span>
       <span>{{ avid }}</span>

@@ -43,6 +43,13 @@ def format_timestamp(ts: int) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
 
 
+def format_duration(seconds: int) -> str:
+    """将秒数格式化为 MM:SS 或 HH:MM:SS。"""
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
 def sanitize_desc(desc: str, limit: int = 120) -> str:
     """合并空白字符并截断文本，超出部分用 … 表示。"""
     cleaned = " ".join(str(desc or "").split())

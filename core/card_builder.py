@@ -84,11 +84,22 @@ class CardBuilder:
             else ""
         )
         comments = await self._service.fetch_comments(card.aid, count=3)
+
+        # 多P信息（仅多P模式下显示）
+        page_info = ""
+        if card.page_count > 1:
+            downloaded = card.downloaded_pages or []
+            if downloaded:
+                page_info = f"共 {card.page_count} P · 本次下载 {len(downloaded)} P"
+            else:
+                page_info = f"共 {card.page_count} P"
+
         return {
             "cover": cover_b64,
             "tname": card.tname or "视频",
             "duration": card.duration_text,
             "title": card.title,
+            "page_info": page_info,
             "up_face": up_face_b64,
             "up_name": card.up_name,
             "pub_time": format_timestamp(card.pub_ts),
