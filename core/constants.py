@@ -189,24 +189,30 @@ VIDEO_CARD_HTML = '''<!DOCTYPE html>
   }
   .video-info .stats {
     display: grid; grid-template-columns: repeat(4, 1fr);
-    gap: 18px 10px; font-size: 24px; color: #555;
-    text-align: center;
-    border-top: 1px solid #f0f0f0; padding-top: 15px;
+    gap: 20px 10px;
+    border-top: 1px solid #f0f0f0; padding-top: 18px;
   }
-  .video-info .stats > span {
+  .stat-item {
     display: flex; flex-direction: column; align-items: center;
+    gap: 5px;
   }
-  .video-info .stats > span::before {
+  .stat-item::before {
     display: block; font-family: 'van';
-    font-size: 42px; margin-bottom: 4px; color: #fb7299;
+    font-size: 40px; line-height: 1; color: #fb7299;
   }
-  .video-info .stats .view::before   { content: "\\e6e6"; }
-  .video-info .stats .dm::before     { content: "\\e6e7"; }
-  .video-info .stats .like::before   { content: "\\e6e0"; }
-  .video-info .stats .coin::before   { content: "\\e6e4"; }
-  .video-info .stats .fav::before    { content: "\\e6e1"; }
-  .video-info .stats .share::before  { content: "\\e70f"; }
-  .video-info .stats .reply::before  { content: "\\e639"; }
+  .stat-num {
+    font-size: 24px; line-height: 1; color: #555;
+  }
+  .stat-label {
+    font-size: 22px; line-height: 1; color: #999;
+  }
+  .stat-view::before     { content: "\\e6e6"; }
+  .stat-danmaku::before  { content: "\\e6e7"; }
+  .stat-like::before     { content: "\\e6e0"; }
+  .stat-coin::before     { content: "\\e6e4"; }
+  .stat-favorite::before { content: "\\e6e1"; }
+  .stat-share::before    { content: "\\e70f"; }
+  .stat-reply::before    { content: "\\e639"; }
 
   .comments {
     padding: 10px 18px 15px 18px;
@@ -216,18 +222,22 @@ VIDEO_CARD_HTML = '''<!DOCTYPE html>
     font-size: 25px; font-weight: 600; color: #555; margin-bottom: 8px;
   }
   .comment-item {
+    display: flex; align-items: flex-start; justify-content: space-between;
     font-size: 24px; line-height: 1.5; margin-bottom: 8px; color: #333;
-    display: flex; align-items: flex-start;
   }
   .comment-item:last-child { margin-bottom: 0; }
+  .comment-main {
+    flex: 1; min-width: 0;
+  }
   .commenter {
     color: #fb7299; font-weight: 500; margin-right: 5px;
     white-space: nowrap;
   }
   .comment-text {
-    word-break: break-all; flex-grow: 1;
+    word-break: break-all;
   }
   .comment-likes {
+    flex-shrink: 0;
     font-size: 22px; color: #999; margin-left: 8px; white-space: nowrap;
   }
   .comment-likes::before {
@@ -241,8 +251,30 @@ VIDEO_CARD_HTML = '''<!DOCTYPE html>
     display: flex; align-items: center; justify-content: center;
     padding: 0 22px; border-top: 1px solid #f0f0f0;
   }
-  .portal .bili-logo {
-    font-size: 28px; font-weight: bold; color: #fb7299; margin: 0 auto;
+  .portal .bili-icon {
+    width: 34px; height: 34px;
+  }
+  .portal .x-symbol {
+    font-size: 26px; color: #fb7299; margin: 0 8px; line-height: 1;
+  }
+  .portal .camera-icon {
+    width: 34px; height: 34px;
+  }
+  .ai-conclusion {
+    padding: 16px 18px;
+    border-top: 1px solid #f0f0f0;
+    background-color: #fafbfc;
+  }
+  .ai-conclusion .ai-conclusion-title {
+    margin-bottom: 8px;
+  }
+  .ai-conclusion .ai-conclusion-title .ai-icon {
+    width: 26px; height: 26px;
+    display: block;
+  }
+  .ai-conclusion .ai-conclusion-text {
+    font-size: 24px; line-height: 1.6; color: #333;
+    word-break: break-all; white-space: pre-wrap;
   }
 </style>
 </head>
@@ -270,30 +302,59 @@ VIDEO_CARD_HTML = '''<!DOCTYPE html>
     </div>
     {% if desc %}<div class="summary">{{ desc }}</div>{% endif %}
     <div class="stats">
-      <span class="view">{{ view }}<br>播放</span>
-      <span class="dm">{{ danmaku }}<br>弹幕</span>
-      <span class="like">{{ like }}<br>点赞</span>
-      <span class="coin">{{ coin }}<br>投币</span>
-      <span class="fav">{{ favorite }}<br>收藏</span>
-      <span class="share">{{ share }}<br>分享</span>
-      <span class="reply">{{ reply }}<br>评论</span>
-      <span></span>
+      {% for s in stats %}
+      <div class="stat-item stat-{{ s.key }}">
+        <span class="stat-num">{{ s.value }}</span>
+        <span class="stat-label">{{ s.label }}</span>
+      </div>
+      {% endfor %}
     </div>
     {% if comments %}
     <div class="comments">
       <div class="comments-title">热门评论</div>
       {% for c in comments %}
       <div class="comment-item">
-        <span class="commenter">{{ c.uname }}:</span>
-        <span class="comment-text">{{ c.text }}</span>
+        <div class="comment-main">
+          <span class="commenter">{{ c.uname }}:</span>
+          <span class="comment-text">{{ c.text }}</span>
+        </div>
         {% if c.likes %}<span class="comment-likes">{{ c.likes }}</span>{% endif %}
       </div>
       {% endfor %}
     </div>
     {% endif %}
   </div>
+  {% if ai_conclusion %}
+  <div class="ai-conclusion">
+    <div class="ai-conclusion-title">
+      <svg class="ai-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" preserveAspectRatio="xMidYMid meet">
+        <g transform="translate(0.8 0.9)">
+          <g transform="translate(0 32)">
+            <path d="m246.3 328.1-17.8 41.2c-6.4 14.8-26.9 14.8-33.3 0l-17.8-41.2c-14.9-34.2-41.8-61.4-75.3-76.3l-48.8-21.6c-14.7-6.5-14.7-27.9 0-34.4l47.2-21c34.4-15.3 61.7-43.5 76.4-78.8l18-43.7c6.3-15.2 27.3-15.2 33.6 0l18 43.7c14.7 35.3 42 63.6 76.4 78.8l47.2 21c14.7 6.5 14.7 27.9 0 34.4l-48.8 21.6c-33.5 14.8-60.4 42.1-75.3 76.2z" fill="#2f86bd" transform="translate(0 35)" />
+            <path d="m402.2 449.3-5.3 12.2c-3.5 7.9-14.4 7.9-17.9 0l-5.3-12.2c-8.4-19.3-23.6-34.6-42.4-43l-15.4-6.9c-7.9-3.5-7.9-14.9 0-18.4l14.5-6.5c19.4-8.6 34.8-24.5 43.1-44.5l5.4-13.1c3.4-8.1 14.6-8.1 18 0l5.4 13.1c8.3 19.9 23.7 35.8 43.1 44.5l14.5 6.5c7.9 3.5 7.9 14.9 0 18.4l-15.4 6.9c-19 8.3-34.1 23.7-42.5 43z" fill="#ff69b4" transform="matrix(0.95 0 0 0.95 22 -278)" />
+          </g>
+        </g>
+      </svg>
+    </div>
+    <div class="ai-conclusion-text">{{ ai_conclusion }}</div>
+  </div>
+  {% endif %}
   <div class="portal">
-    <span class="bili-logo">bilibili</span>
+    <svg class="bili-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" preserveAspectRatio="xMidYMid meet">
+      <g transform="translate(0.8 0.9)">
+        <g transform="translate(0 32)">
+          <path d="m246.3 328.1-17.8 41.2c-6.4 14.8-26.9 14.8-33.3 0l-17.8-41.2c-14.9-34.2-41.8-61.4-75.3-76.3l-48.8-21.6c-14.7-6.5-14.7-27.9 0-34.4l47.2-21c34.4-15.3 61.7-43.5 76.4-78.8l18-43.7c6.3-15.2 27.3-15.2 33.6 0l18 43.7c14.7 35.3 42 63.6 76.4 78.8l47.2 21c14.7 6.5 14.7 27.9 0 34.4l-48.8 21.6c-33.5 14.8-60.4 42.1-75.3 76.2z" fill="#ff69b4" transform="translate(0 35)" />
+          <path d="m402.2 449.3-5.3 12.2c-3.5 7.9-14.4 7.9-17.9 0l-5.3-12.2c-8.4-19.3-23.6-34.6-42.4-43l-15.4-6.9c-7.9-3.5-7.9-14.9 0-18.4l14.5-6.5c19.4-8.6 34.8-24.5 43.1-44.5l5.4-13.1c3.4-8.1 14.6-8.1 18 0l5.4 13.1c8.3 19.9 23.7 35.8 43.1 44.5l14.5 6.5c7.9 3.5 7.9 14.9 0 18.4l-15.4 6.9c-19 8.3-34.1 23.7-42.5 43z" fill="#2f86bd" transform="matrix(0.95 0 0 0.95 22 -278)" />
+        </g>
+      </g>
+    </svg>
+    <span class="x-symbol">x</span>
+    <svg class="camera-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <g>
+        <path fill="none" d="M0 0h24v24H0z"/>
+        <path d="M18.223 3.086a1.25 1.25 0 0 1 0 1.768L17.08 5.996h1.17A3.75 3.75 0 0 1 22 9.747v7.5a3.75 3.75 0 0 1-3.75 3.75H5.75A3.75 3.75 0 0 1 2 17.247v-7.5a3.75 3.75 0 0 1 3.75-3.75h1.166L5.775 4.855a1.25 1.25 0 1 1 1.767-1.768l2.652 2.652c.079.079.145.165.198.257h3.213c.053-.092.12-.18.199-.258l2.651-2.652a1.25 1.25 0 0 1 1.768 0zm.027 5.42H5.75a1.25 1.25 0 0 0-1.247 1.157l-.003.094v7.5c0 .659.51 1.199 1.157 1.246l.093.004h12.5a1.25 1.25 0 0 0 1.247-1.157l.003-.093v-7.5c0-.69-.56-1.25-1.25-1.25zm-10 2.5c.69 0 1.25.56 1.25 1.25v1.25a1.25 1.25 0 1 1-2.5 0v-1.25c0-.69.56-1.25 1.25-1.25zm7.5 0c.69 0 1.25.56 1.25 1.25v1.25a1.25 1.25 0 1 1-2.5 0v-1.25c0-.69.56-1.25 1.25-1.25z" fill="#ff69b4"/>
+      </g>
+    </svg>
   </div>
 </div>
 </body>

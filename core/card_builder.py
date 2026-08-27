@@ -20,8 +20,19 @@ from .constants import (
 )
 from .models import ArticleCard, OpusCard, SafeFormatDict, VideoCard
 from .service import BilibiliService
-from .utils import format_count, format_timestamp, sanitize_desc
+from .utils import format_count, format_timestamp, safe_int, sanitize_desc
 
+
+# 统计项定义：key 对应 VideoCard 属性名与 CSS class，label 为中文展示名
+STAT_DEFS = [
+    {"key": "view", "label": "播放"},
+    {"key": "danmaku", "label": "弹幕"},
+    {"key": "like", "label": "点赞"},
+    {"key": "coin", "label": "投币"},
+    {"key": "favorite", "label": "收藏"},
+    {"key": "share", "label": "分享"},
+    {"key": "reply", "label": "评论"},
+]
 
 # html_render 可调用对象的签名: (template: str, data: dict, options: dict) -> str (返回图片 URL)
 HtmlRenderFunc = Callable[..., str]
@@ -83,7 +94,8 @@ class CardBuilder:
             if card.up_face_url
             else ""
         )
-        comments = await self._service.fetch_comments(card.aid, count=3)
+        comment_count = safe_int(self._config.get("comment_count", 3), 3, 0, 20)
+        comments = await self._service.fetch_comments(card.aid, count=comment_count)
 
         # 多P信息（仅多P模式下显示）
         page_info = ""
@@ -94,23 +106,40 @@ class CardBuilder:
             else:
                 page_info = f"共 {card.page_count} P"
 
+        # AI 总结（需配置开启且视频有 cid）
+        ai_conclusion = ""
+        if self._config.get("show_ai_conclusion", False) and card.cid > 0:
+            result = await self._service.fetch_ai_conclusion(
+                bvid=card.bvid, aid=card.aid, cid=card.cid
+            )
+            if result is None:
+                ai_conclusion = "⚠️ 未登录，无法获取 AI 总结"
+            else:
+                ai_conclusion = result
+
+        # 统计项（根据配置 show_stats 显示哪些）
+        show_stats = self._config.get("show_stats")
+        if show_stats is None:
+            show_stats = [d["key"] for d in STAT_DEFS]
+        stats = [
+            {"key": d["key"], "label": d["label"],
+             "value": format_count(getattr(card, d["key"], 0))}
+            for d in STAT_DEFS
+            if d["key"] in show_stats
+        ]
+
         return {
             "cover": cover_b64,
             "tname": card.tname or "视频",
             "duration": card.duration_text,
             "title": card.title,
             "page_info": page_info,
+            "ai_conclusion": ai_conclusion,
             "up_face": up_face_b64,
             "up_name": card.up_name,
             "pub_time": format_timestamp(card.pub_ts),
             "avid": f"av{card.aid}",
-            "view": format_count(card.view),
-            "danmaku": format_count(card.danmaku),
-            "like": format_count(card.like),
-            "coin": format_count(card.coin),
-            "favorite": format_count(card.favorite),
-            "reply": format_count(card.reply),
-            "share": format_count(card.share),
+            "stats": stats,
             "desc": sanitize_desc(card.desc, 150),
             "comments": comments,
             "font_van_base64": FONT_BASE64_CONTENT,
@@ -180,8 +209,10 @@ class CardBuilder:
                     data,
                     options={
                         "type": "jpeg",
-                        "quality": 90,
+                        "quality": 95,
                         "full_page": True,
+                        "scale": "device",
+                        "device_scale_factor_level": "ultra",
                         "clip": {"x": 0, "y": 0, "width": 750, "height": 3000},
                     },
                 )
@@ -223,8 +254,10 @@ class CardBuilder:
                     data,
                     options={
                         "type": "jpeg",
-                        "quality": 90,
+                        "quality": 95,
                         "full_page": True,
+                        "scale": "device",
+                        "device_scale_factor_level": "ultra",
                         "clip": {"x": 0, "y": 0, "width": 750, "height": 3000},
                     },
                 )
@@ -255,8 +288,10 @@ class CardBuilder:
                     data,
                     options={
                         "type": "jpeg",
-                        "quality": 90,
+                        "quality": 95,
                         "full_page": True,
+                        "scale": "device",
+                        "device_scale_factor_level": "ultra",
                         "clip": {"x": 0, "y": 0, "width": 750, "height": 3000},
                     },
                 )

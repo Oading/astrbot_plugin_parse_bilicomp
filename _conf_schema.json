@@ -76,8 +76,27 @@
   "download_all_pages": {
     "description": "下载多P视频的所有P",
     "type": "bool",
-    "default": false,
+    "default": true,
     "hint": "开启后尝试下载视频的所有P（最多10个），每个P独立检测时长/大小限制；关闭则只下载1P"
+  },
+  "show_ai_conclusion": {
+    "description": "显示AI总结",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后在视频信息卡片中显示AI总结（需要登录B站账号，且仅部分视频有AI总结）"
+  },
+  "show_stats": {
+    "description": "图片卡片统计项",
+    "type": "list",
+    "default": ["view", "danmaku", "like", "coin", "favorite", "share", "reply"],
+    "options": ["view", "danmaku", "like", "coin", "favorite", "share", "reply"],
+    "labels": ["播放", "弹幕", "点赞", "投币", "收藏", "分享", "评论"]
+  },
+  "comment_count": {
+    "description": "显示评论数量",
+    "type": "int",
+    "default": 3,
+    "hint": "显示的热门评论数量，范围 0-20。评论过多会导致卡片过长，超过3需要登录"
   },
   "video_quality": {
     "description": "视频下载清晰度",

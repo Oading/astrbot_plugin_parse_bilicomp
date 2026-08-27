@@ -2,6 +2,35 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## [3.0.2] - 2026-08-28
+
+### 新增
+
+- **AI 总结配置项**：新增 `show_ai_conclusion` 配置项（`bool`，默认 `false`），开启后在视频信息卡片中显示 AI 总结。需要登录 B站账号（接口未登录返回 `-101`），且仅部分视频有 AI 总结。
+- **VideoCard cid 字段**：`VideoCard` 新增 `cid` 字段（第一 P 的 cid，用于获取 AI 总结）。
+- **AI 总结获取方法**：`service.py` 新增 `fetch_ai_conclusion()`，调用 bilibili-api 的 `Video.get_ai_conclusion(cid=...)`，提取 `data.model_result.summary`，返回 `str | None`（`None` 表示未登录，`""` 表示无总结或失败）。
+- **卡片 AI 总结展示**：`card_builder` 注入 `ai_conclusion` 字段；未登录时显示 `"⚠️ 未登录，无法获取 AI 总结"`；HTML 模板在评论块与底部 bilibili 之间新增 AI 总结块。
+- **统计项自定义配置**：新增 `show_stats` 配置项（`list` + `options` + `labels` 多选），支持 `view` / `danmaku` / `like` / `coin` / `favorite` / `share` / `reply`，默认全部勾选；`card_builder` 新增 `STAT_DEFS` 常量，根据配置过滤构建 `stats` 列表；HTML 用 `{% for s in stats %}` 循环渲染，CSS 用 `.stat-xxx::before` 设置图标。
+- **评论数量配置**：新增 `comment_count` 配置项（`int`，默认 `3`，范围 `0-20`）。
+
+### 变更
+
+- **卡片样式优化**：
+  - 统计项图标/数字/文本对齐：移除 `<br>`，改用独立 `span`（`stat-num` / `stat-label`），`flex-column` + `gap 5px` + `line-height 1`，三者垂直居中、间距统一
+  - 底部 bilibili 前新增 B站 TV SVG 图标（`bili-icon`）
+  - AI 总结标题由文字改为 SVG 图标（与 bilibili 同图形，颜色对调以区分）
+  - 底部 "bilibili" 文字替换为摄像头 SVG 图标，中间加 "x" 分隔（`[B站 TV 图标] x [摄像头图标]`，`x` 颜色粉色 `#fb7299`，两侧间距统一 `8px`）
+  - "AI 总结" 与 "热门评论" 标题开头竖向对齐（`padding` 统一 `18px`）
+- **配置默认值调整**：`download_all_pages` 默认 `false → true`；`show_stats` description 改为 "图片卡片统计项"；`comment_count` description 改为 "显示评论数量"，hint 补充"超过3需要登录"。
+- **文档与版本**：`README.md` 更新（功能说明、配置表格）；`metadata.yaml` version 从 `3.0.1` 升至 `3.0.2`。
+
+### 修复
+
+- **长评论换行错位**：第二行顶格对齐用户名第一个字，而非缩进到评论文字。改用 `block` + `inline` 自然流，评论主体包 `comment-main`。
+- **点赞图标位置异常**：点赞图标+点赞数回到第一行最右边（`flex` + `justify-content: space-between`）。
+- **评论无法超过 3 条**：`fetch_comments` 未传 `credential`，导致始终未登录，B站对未登录用户热门评论仅返回 3 条。修复为 `get_comments` 传入 `credential`（需登录才能超过 3 条）。
+- **图片清晰度模糊**：三处 `html_render` 统一新增高分辨率参数 `scale: "device"`、`device_scale_factor_level: "ultra"`（1.8x）、`quality: 90 → 95`。根因是默认 `scale="css"`（1:1）和 `normal`（1.0x），750px 宽截图在高分屏模糊。
+
 ## [3.0.1] - 2026-08-26
 
 ### 新增
