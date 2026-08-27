@@ -37,6 +37,7 @@ class VideoCard:
     up_face_url: str = ""
     tname: str = ""
     video_path: Path | None = None
+    cid: int = 0  # 第一P的cid，用于获取AI总结
     pages: list = None  # 所有P的信息 [{page, part, duration}, ...]
     downloaded_pages: list = None  # 已下载的P号列表（多P模式用于汇总卡片显示）
 

@@ -99,6 +99,7 @@ class BilibiliService:
             link += f"?p={page_idx + 1}"
 
         dur = safe_int(pg.get("duration", info.get("duration", 0)))
+        cid = safe_int(pages[0].get("cid", 0)) if pages else 0
 
         return VideoCard(
             aid=_aid,
@@ -120,8 +121,44 @@ class BilibiliService:
             share=safe_int(stat.get("share", 0)),
             tname=str(info.get("tname", "")),
             video_path=None,
+            cid=cid,
             pages=pages_info,
         )
+
+    async def fetch_ai_conclusion(
+        self, bvid: str = "", aid: int = 0, cid: int = 0
+    ) -> str | None:
+        """获取视频 AI 总结文本。
+
+        Returns:
+            总结文本；空字符串表示无总结或获取失败；None 表示未登录。
+        """
+        if cid <= 0:
+            return ""
+        cred = await self._cred_mgr.get()
+        if cred is None:
+            logger.warning("未登录 B站账号，无法获取 AI 总结")
+            return None
+        if aid:
+            v = Video(aid=aid, credential=cred)
+        elif bvid:
+            v = Video(bvid=bvid, credential=cred)
+        else:
+            return ""
+
+        try:
+            data = await v.get_ai_conclusion(cid=cid)
+        except Exception as e:
+            logger.debug(f"获取AI总结失败: {e}")
+            return ""
+
+        # 提取总结文本：get_ai_conclusion 默认已提取 data 字段
+        result = data.get("data") or data if isinstance(data, dict) else {}
+        model_result = result.get("model_result") or {}
+        summary = model_result.get("summary", "")
+        if isinstance(summary, str):
+            return summary.strip()
+        return ""
 
     async def prepare_download(
         self,
@@ -403,11 +440,14 @@ class BilibiliService:
 
     async def fetch_comments(self, oid: int, count: int = 3) -> list[dict]:
         """获取视频热门评论（最多 count 条）。"""
+        count = safe_int(count, 3, 0, 20)
+        cred = await self._cred_mgr.get()
         try:
             c = await get_comments(
                 oid=oid,
                 type_=CommentResourceType.VIDEO,
                 order=OrderType.LIKE,
+                credential=cred,
             )
             result = []
             for cmt in c.get("replies", [])[:count]:

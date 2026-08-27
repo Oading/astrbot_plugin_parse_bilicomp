@@ -27,6 +27,7 @@
 | **自动下载** | 管理员可通过`/bili 自动下载 on`、`/bili 自动下载 off`控制群内自动下载功能，该指令在全局解析下无效 |
 | **下载限制** | 默认仅自动下载 10 分钟/100MB以内的视频，避免过大文件影响群聊体验 可通过WebUI配置下载视频最长时长与最大大小；且支持下载限制模式切换 |
 | **下载提示** |  下载视频前会显示视频标题和预估大小，可选择是否主动撤回提示；当无法下载会告知原因 |
+| **AI总结** |  默认关闭，需要登录后才能使用，有些视频没有是 B 站的缘故 |
 | **扫码登录** | 支持 `/bili 登录` 生成二维码扫码登录 B 站账号 |
 | **登录状态查询** | 支持 `/bili 状态` 查看当前被动解析模式相关与登录状态 |
 | **登出账号** | 支持 `/bili 登出` 登出后会清空bilibili_cookies的值 |
@@ -84,8 +85,11 @@
 | `show_download_prompt` | true | 下载提示信息 |
 | `show_download_fail_reason` | true | 下载失败信息 |
 | `retract_download_prompt` | false | 开启后，下载成功时下载提示信息在一分钟后会尝试撤回 |
-| `download_all_pages` | false | 开启后尝试下载视频的所有P（最多10个），每个P独立检测时长/大小限制；关闭则只下载1P |
-| `video_quality` | 480P | 下载清晰度：360P / 480P / 720P / 1080P |
+| `download_all_pages` | true | 开启后尝试下载视频的所有P（最多10个），每个P独立检测时长/大小限制；关闭则只下载1P |
+| `show_ai_conclusion` | true | AI总结，使用了async def get_ai_conclusion() |
+| `show_stats` | 详见插件配置 | 控制图片卡片的图标显示 |
+| `comment_count` | 3 | 超过3需登录，0为不显示评论 |
+| `video_quality` | 480P | 480P及以上需登录 |
 | `parse_template` | 详见插件配置 | 文字模式下的消息模板 |
 | `opus_try_article` | true | 当识别到 /opus 时，尝试转为 /read/cv 获取全文。仅对专栏类动态生效，普通图文无效 |
 | `*bilibili_cookies` | — | B站 Cookies（`/bili 登录` 扫码填充） |
