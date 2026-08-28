@@ -36,6 +36,12 @@
     "default": 5,
     "hint": "同一链接在此时间内不重复解析，0=关闭"
   },
+  "dedup_remind": {
+    "description": "视频去重提醒",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，在去重缓存时间内重复发送同一视频时，bot 会引用并@第一次发送者提醒。仅控制提醒消息，不影响去重本身"
+  },
   "auto_download_max_duration": {
     "description": "视频最大时长（分钟）",
     "type": "int",
@@ -79,6 +85,12 @@
     "default": true,
     "hint": "开启后尝试下载视频的所有P（最多10个），每个P独立检测时长/大小限制；关闭则只下载1P"
   },
+  "multi_page_forward": {
+    "description": "多P使用合并转发发送",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后多P视频以聊天记录（合并转发）方式合并为一条消息发送，避免刷屏；仅支持 OneBot 平台"
+  },
   "show_ai_conclusion": {
     "description": "显示AI总结",
     "type": "bool",
@@ -97,6 +109,14 @@
     "type": "int",
     "default": 3,
     "hint": "显示的热门评论数量，范围 0-20。评论过多会导致卡片过长，超过3需要登录"
+  },
+  "media_cache_retention": {
+    "description": "媒体缓存保留时长",
+    "type": "string",
+    "default": "1day",
+    "options": ["1day", "3days", "7days", "never"],
+    "labels": ["一天", "三天", "七天", "永不"],
+    "hint": "超过该时长的视频缓存会被自动清理。选择永不会导致占用越来越多存储空间"
   },
   "video_quality": {
     "description": "视频下载清晰度",

@@ -2,6 +2,26 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## [3.0.3] - 2026-08-28
+
+### 新增
+
+- **媒体缓存保留时长配置**：新增 `media_cache_retention` 配置项（`string`，`options`：`一天`/`三天`/`七天`/`永不`，默认 `一天`），控制 `media_cache/` 下 `.mp4` 文件的保留时间。开启后，清理循环仅删除超过保留时长的文件，保护新下载文件不被误删。
+- **缓存查看命令**：`bili` 指令组新增 `缓存` 子指令（管理员权限），用于列出 `media_cache/` 下所有 `.mp4` 文件（显示文件名+大小，按时间倒序），无缓存时提示“当前无缓存”。
+- **去重提醒功能**：新增 `dedup_remind` 配置项（`bool`，默认 `true`），开启后重复视频时发送两条提醒：①引用当前消息 @ 首次发送者“这个视频已经发过了”；②引用之前 bot 发的视频消息 @ 首次发送者“视频在这里”。该配置仅控制提醒消息是否发出，不影响去重本身。
+- **多 P 合并转发**：新增 `multi_page_forward` 配置项（`bool`，默认 `false`），开启后多 P 视频以聊天记录（合并转发）合并为一条消息发送，避免刷屏。仅支持 OneBot 平台。
+- **OneBot 直发视频 API**：新增 `_send_video_via_onebot()` 和 `_send_forward_via_onebot()` 方法，分别通过 OneBot 的 `send_group_msg`（视频段）和 `send_group_forward_msg` 直发视频及合并转发，以获取消息 ID；同时新增 `_set_debounce_video_msg_id()` 记录视频消息 ID 到去重记录。
+
+### 变更
+
+- **媒体缓存清理逻辑**：`_cleanup_loop` 从“每天全删”改为“按文件年龄清理”，仅删除超过 `media_cache_retention` 时长的文件，新下载文件不被误删；检查频率从每天改为每小时（按年龄清理，频繁检查不影响稳定性）。
+- **版本号**：`metadata.yaml` version 从 `3.0.2` 升至 `3.0.3`。
+
+### 修复
+
+- **去重失效问题**：去重 key 原带 `source_kind` 前缀（`code:` 或 `short:`），导致同一视频（BV号、组件、短链）因前缀不同而无法正确去重。现已移除前缀，统一使用 `bvid_or_url` 作为 key，确保不同来源的相同视频正确去重。
+- **视频消息 ID 获取失败**：`context.send_message` 返回值不含 `message_id`，`_extract_msg_id` 提取失败导致 `video_msg_id` 始终为空，去重引用无法正常指向视频消息。现已改用 OneBot 直发 API 成功获取 `message_id` 并记录，同时保留回退 `context.send_message` 确保视频照常发出。
+
 ## [3.0.2] - 2026-08-28
 
 ### 新增

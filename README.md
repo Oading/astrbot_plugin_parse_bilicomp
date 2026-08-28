@@ -27,6 +27,7 @@
 | **自动下载** | 管理员可通过`/bili 自动下载 on`、`/bili 自动下载 off`控制群内自动下载功能，该指令在全局解析下无效 |
 | **下载限制** | 默认仅自动下载 10 分钟/100MB以内的视频，避免过大文件影响群聊体验 可通过WebUI配置下载视频最长时长与最大大小；且支持下载限制模式切换 |
 | **下载提示** |  下载视频前会显示视频标题和预估大小，可选择是否主动撤回提示；当无法下载会告知原因 |
+| **查看缓存** |  可通过`/bili 缓存`查看，展示目前所有的缓存视频 |
 | **AI总结** |  默认关闭，需要登录后才能使用，有些视频没有是 B 站的缘故 |
 | **扫码登录** | 支持 `/bili 登录` 生成二维码扫码登录 B 站账号 |
 | **登录状态查询** | 支持 `/bili 状态` 查看当前被动解析模式相关与登录状态 |
@@ -79,6 +80,7 @@
 | `send_cover` | true | 渲染为图片卡片关闭时附加封面图片 |
 | `render_as_image` | true | 渲染为 HTML 图片卡片，关闭则发送文字 + 封面图 |
 | `cache_ttl` | 5 | 去重缓存时间（分钟），0 = 关闭 |
+| `dedup_remind` | true | 在去重缓存时间内重复发送同一视频时，bot 会引用并@第一次发送者提醒。 |
 | `auto_download_max_duration` | 10 | 自动下载最大时长（分钟） |
 | `max_video_size_mb` | 100 | 自动下载最大大小（MB） |
 | `download_restriction_mode` | both | 下载限制模式 |
@@ -86,9 +88,11 @@
 | `show_download_fail_reason` | true | 下载失败信息 |
 | `retract_download_prompt` | false | 开启后，下载成功时下载提示信息在一分钟后会尝试撤回 |
 | `download_all_pages` | true | 开启后尝试下载视频的所有P（最多10个），每个P独立检测时长/大小限制；关闭则只下载1P |
+| `multi_page_forward` | false | 开启后多P视频以合并转发方式合并为一条消息发送 |
 | `show_ai_conclusion` | true | AI总结，使用了async def get_ai_conclusion() |
 | `show_stats` | 详见插件配置 | 控制图片卡片的图标显示 |
 | `comment_count` | 3 | 超过3需登录，0为不显示评论 |
+| `media_cache_retention` | 一天 | 超过该时长的视频缓存会被自动清理 |
 | `video_quality` | 480P | 480P及以上需登录 |
 | `parse_template` | 详见插件配置 | 文字模式下的消息模板 |
 | `opus_try_article` | true | 当识别到 /opus 时，尝试转为 /read/cv 获取全文。仅对专栏类动态生效，普通图文无效 |
