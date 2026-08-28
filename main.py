@@ -26,7 +26,7 @@ from bilibili_api.dynamic import Dynamic
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
-from astrbot.api.message_components import At, Image, Video as MessageVideo
+from astrbot.api.message_components import At, Image, Node, Plain, Reply, Video as MessageVideo
 from astrbot.api.star import Context, Star, StarTools
 
 from .core import (
@@ -89,7 +89,8 @@ class ParseBilibiliPlugin(Star):
         )
 
         # ── 去重状态 ──
-        self._debounce: dict[str, dict[str, float]] = {}
+        # umo -> {key: {"expires": float, "sender": str}}
+        self._debounce: dict[str, dict[str, dict]] = {}
 
         # ── 已启用被动解析的群组 ──
         self._init_enabled_groups()
@@ -108,15 +109,29 @@ class ParseBilibiliPlugin(Star):
         logger.info(f"{PLUGIN_NAME} 已卸载")
 
     async def _cleanup_loop(self):
-        """每天清理一次媒体缓存。"""
+        """按文件年龄清理媒体缓存（超过保留时长的文件会被删除）。"""
         while True:
-            await asyncio.sleep(86400)
+            await asyncio.sleep(3600)  # 每小时检查一次
+            retention = self._media_cache_retention_seconds()
+            if retention is None:
+                continue  # 永不清理
+            now = time.time()
             try:
                 for f in self._media_dir.rglob("*"):
-                    if f.is_file():
+                    if f.is_file() and now - f.stat().st_mtime > retention:
                         f.unlink(missing_ok=True)
             except Exception:
                 pass
+
+    def _media_cache_retention_seconds(self) -> int | None:
+        """返回媒体缓存保留时长（秒）；永不清理返回 None。"""
+        mapping = {
+            "1day": 86400,
+            "3days": 3 * 86400,
+            "7days": 7 * 86400,
+            "never": None,
+        }
+        return mapping.get(self.config.get("media_cache_retention", "1day"), 86400)
 
     # ── 局部模式群组配置 ──────────────────────────────
 
@@ -132,23 +147,33 @@ class ParseBilibiliPlugin(Star):
 
     # ── 去重 ──────────────────────────────────────────
 
-    def _is_debounced(self, umo: str, key: str) -> bool:
-        """检查是否在去重冷却期内。"""
+    def _check_debounced(self, umo: str, key: str, sender_id: str) -> dict | None:
+        """检查是否在去重冷却期内。
+
+        Returns:
+            重复时返回第一次的记录（含 sender 与 video_msg_id）；不重复时记录并返回 None。
+        """
         ttl = self.config.get("cache_ttl", 5) * 60
         if ttl <= 0:
-            return False
+            return None
         now = time.time()
         if umo not in self._debounce:
             self._debounce[umo] = {}
         entry = self._debounce[umo]
-        if key in entry and entry[key] > now:
-            return True
-        entry[key] = now + ttl
+        if key in entry and entry[key]["expires"] > now:
+            return entry[key]
+        entry[key] = {"expires": now + ttl, "sender": sender_id, "video_msg_id": ""}
         # 清理过期条目
-        expired = [k for k, v in entry.items() if v <= now]
+        expired = [k for k, v in entry.items() if v["expires"] <= now]
         for k in expired:
             del entry[k]
-        return False
+        return None
+
+    def _set_debounce_video_msg_id(self, umo: str, key: str, msg_id: str) -> None:
+        """记录去重 key 对应的视频消息 ID（用于后续引用视频）。"""
+        entry = self._debounce.get(umo, {}).get(key)
+        if entry:
+            entry["video_msg_id"] = str(msg_id)
 
     # ═══════════════════════════════════════════════════
     # 下载限制检查
@@ -266,12 +291,13 @@ class ParseBilibiliPlugin(Star):
 
     async def _handle_multi_page(
         self, event, card, quality, requested_quality, umo, bvid_or_aid_kw,
-        always_download: bool = False,
+        always_download: bool = False, key: str = "",
     ):
         """多P下载流程：逐P检测限制 → 下载 → 发送汇总卡片 + 视频 + 提示。
 
         Args:
             always_download: 手动下载时为 True，忽略 send_video 开关强制下载。
+            key: 去重 key（仅被动解析传入，用于记录视频消息 ID 供后续引用）。
         """
         send_video = always_download or self.config.get("send_video", True)
         pages = card.pages[:10]  # 最多 10 个 P
@@ -336,13 +362,39 @@ class ParseBilibiliPlugin(Star):
                 yield event.chain_result(chain.chain)
 
         # 6. 发所有视频文件
-        for page_num, path, _size_info, _pg in video_paths:
-            vc = MessageChain()
-            vc.chain.append(MessageVideo.fromFileSystem(str(path)))
-            try:
-                await self.context.send_message(umo, vc)
-            except Exception as e:
-                logger.warning(f"第{page_num}P视频发送失败: {e}")
+        if self.config.get("multi_page_forward", False) and video_paths:
+            # 合并转发（聊天记录）方式：优先 OneBot 直发获取消息 ID（供去重引用），失败回退
+            forward_msg_id = await self._send_forward_via_onebot(event, video_paths)
+            if forward_msg_id is not None:
+                if key:
+                    self._set_debounce_video_msg_id(umo, key, forward_msg_id)
+            else:
+                self_id = int(event.get_self_id())
+                nodes = [
+                    Node(
+                        uin=self_id,
+                        name=f"P{page_num}",
+                        content=[MessageVideo.fromFileSystem(str(path))],
+                    )
+                    for page_num, path, _size_info, _pg in video_paths
+                ]
+                yield event.chain_result(nodes)
+        else:
+            # 逐个发送
+            for idx, (page_num, path, _size_info, _pg) in enumerate(video_paths):
+                # 优先用 OneBot 直发以获取消息 ID（供去重提醒引用），失败回退普通发送
+                video_msg_id = await self._send_video_via_onebot(event, path)
+                if video_msg_id is not None:
+                    # 记录第一个视频的消息 ID，供去重提醒时引用
+                    if key and idx == 0:
+                        self._set_debounce_video_msg_id(umo, key, video_msg_id)
+                else:
+                    vc = MessageChain()
+                    vc.chain.append(MessageVideo.fromFileSystem(str(path)))
+                    try:
+                        await self.context.send_message(umo, vc)
+                    except Exception as e:
+                        logger.warning(f"第{page_num}P视频发送失败: {e}")
 
     async def _send_prompt_and_maybe_retract(
         self, event: AstrMessageEvent, text: str
@@ -422,6 +474,74 @@ class ParseBilibiliPlugin(Star):
             return int(getattr(result, "message_id"))
         return None
 
+    async def _send_video_via_onebot(self, event, video_path) -> int | None:
+        """通过 OneBot API 发送视频文件，返回 message_id 或 None。
+
+        用于获取视频消息 ID 以便去重提醒时引用；失败返回 None 供调用方回退。
+        """
+        try:
+            from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
+                AiocqhttpMessageEvent,
+            )
+            if not isinstance(event, AiocqhttpMessageEvent):
+                return None
+            uri = Path(video_path).as_uri()
+            segment = {"type": "video", "data": {"file": uri}}
+            gid = event.get_group_id()
+            if gid:
+                result = await event.bot.api.call_action(
+                    "send_group_msg", group_id=int(gid), message=[segment]
+                )
+            else:
+                result = await event.bot.api.call_action(
+                    "send_private_msg",
+                    user_id=int(event.get_sender_id()),
+                    message=[segment],
+                )
+            return self._extract_msg_id(result)
+        except Exception as e:
+            logger.debug(f"_send_video_via_onebot 失败: {e}")
+            return None
+
+    async def _send_forward_via_onebot(self, event, video_paths) -> int | None:
+        """通过 OneBot API 发送合并转发（聊天记录），返回 message_id 或 None。
+
+        video_paths: [(page_num, path, size_info, pg), ...]
+        """
+        try:
+            from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
+                AiocqhttpMessageEvent,
+            )
+            if not isinstance(event, AiocqhttpMessageEvent):
+                return None
+            self_id = str(event.get_self_id())
+            nodes = []
+            for page_num, path, _size_info, _pg in video_paths:
+                uri = Path(path).as_uri()
+                nodes.append({
+                    "type": "node",
+                    "data": {
+                        "user_id": self_id,
+                        "nickname": f"P{page_num}",
+                        "content": [{"type": "video", "data": {"file": uri}}],
+                    },
+                })
+            gid = event.get_group_id()
+            if gid:
+                result = await event.bot.api.call_action(
+                    "send_group_forward_msg", group_id=int(gid), messages=nodes
+                )
+            else:
+                result = await event.bot.api.call_action(
+                    "send_private_forward_msg",
+                    user_id=int(event.get_sender_id()),
+                    messages=nodes,
+                )
+            return self._extract_msg_id(result)
+        except Exception as e:
+            logger.debug(f"_send_forward_via_onebot 失败: {e}")
+            return None
+
     async def _retract_onebot(
         self, event: AstrMessageEvent, msg_id: int, delay: int
     ) -> None:
@@ -486,8 +606,29 @@ class ParseBilibiliPlugin(Star):
 
         # ── 去重 ──
         umo = event.unified_msg_origin
-        key = f"{source_kind}:{bvid_or_url}"
-        if self._is_debounced(umo, key):
+        key = bvid_or_url  # 去掉 source_kind 前缀，同一视频不同来源也能去重
+        sender_id = str(event.get_sender_id())
+        first_record = self._check_debounced(umo, key, sender_id)
+        if first_record is not None:
+            # 重复：根据配置开关发提醒（不影响去重本身）
+            if self.config.get("dedup_remind", True):
+                first_sender = first_record.get("sender", "")
+                cur_msg_id = str(event.message_obj.message_id) if event.message_obj else ""
+                # 第一条：引用当前消息 + @ 第一次发送者
+                yield event.chain_result([
+                    Reply(id=cur_msg_id, sender_id=sender_id),
+                    At(qq=first_sender),
+                    Plain(text=" 这个视频已经发过了"),
+                ])
+                # 第二条：引用之前 bot 发出的视频消息 + @ 第一次发送者（视频已发出才引用）
+                video_msg_id = first_record.get("video_msg_id", "")
+                if video_msg_id:
+                    yield event.chain_result([
+                        Reply(id=video_msg_id, sender_id=str(event.get_self_id())),
+                        At(qq=first_sender),
+                        Plain(text=" 视频在这里"),
+                    ])
+            event.stop_event()
             return
 
         # ── 专栏解析 ──
@@ -561,7 +702,7 @@ class ParseBilibiliPlugin(Star):
         # 多P下载分支
         if self.config.get("download_all_pages", False) and card.page_count > 1:
             async for r in self._handle_multi_page(
-                event, card, quality, requested_quality, umo, bvid_or_aid_kw
+                event, card, quality, requested_quality, umo, bvid_or_aid_kw, key=key
             ):
                 yield r
             event.stop_event()
@@ -616,10 +757,15 @@ class ParseBilibiliPlugin(Star):
         chains = await self._card_builder.build_video_chains(card)
         for chain in chains:
             if len(chain.chain) == 1 and isinstance(chain.chain[0], MessageVideo):
-                try:
-                    await self.context.send_message(umo, chain)
-                except Exception as e:
-                    logger.warning(f"视频发送失败: {e}")
+                # 优先用 OneBot 直发以获取消息 ID（供去重提醒引用），失败回退普通发送
+                video_msg_id = await self._send_video_via_onebot(event, card.video_path)
+                if video_msg_id is not None:
+                    self._set_debounce_video_msg_id(umo, key, video_msg_id)
+                else:
+                    try:
+                        await self.context.send_message(umo, chain)
+                    except Exception as e:
+                        logger.warning(f"视频发送失败: {e}")
             else:
                 yield event.chain_result(chain.chain)
 
@@ -831,3 +977,23 @@ class ParseBilibiliPlugin(Star):
         """管理员登出 B站账号。"""
         await self._cred_mgr.clear()
         yield event.plain_result("✅ 已登出")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @bili.command("缓存")
+    async def cmd_cache(self, event: AstrMessageEvent):
+        """查看当前缓存的视频列表。"""
+        try:
+            files = [f for f in self._media_dir.rglob("*.mp4") if f.is_file()]
+        except Exception:
+            files = []
+
+        if not files:
+            yield event.plain_result("当前无缓存")
+            return
+
+        files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+        lines = [f"当前缓存 {len(files)} 个视频："]
+        for f in files:
+            size_mb = f.stat().st_size / 1024 / 1024
+            lines.append(f"  {f.name} · {size_mb:.1f}MB")
+        yield event.plain_result("\n".join(lines))

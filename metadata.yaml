@@ -4,7 +4,7 @@ short_desc: 解析B站相关内容组件并以图片展示，支持视频下载�
 desc: >
   解析B站相关内容组件并以图片展示，支持视频下载、专栏预览、AI总结等功能。
 author: oading
-version: 3.0.2
+version: 3.0.3
 repo: https://github.com/Oading/astrbot_plugin_parse_bilicomp
 astrbot_version: ">=4.10.4,<5"
 support_platforms:
